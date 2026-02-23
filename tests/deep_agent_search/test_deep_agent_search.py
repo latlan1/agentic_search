@@ -188,6 +188,32 @@ class TestConstants:
         assert "citation" in SEARCH_SYSTEM_PROMPT.lower()
 
 
+class TestFormatTime:
+    """Test the format_time() function for elapsed time display."""
+    
+    def test_format_time_seconds_only(self):
+        """Test formatting times under 60 seconds."""
+        from deep_agent_search import format_time
+        
+        assert format_time(30.5) == "30.5s"
+        assert format_time(0.1) == "0.1s"
+        assert format_time(59.9) == "59.9s"
+    
+    def test_format_time_with_minutes(self):
+        """Test formatting times over 60 seconds."""
+        from deep_agent_search import format_time
+        
+        assert format_time(60.0) == "1m 0.0s"
+        assert format_time(90.0) == "1m 30.0s"
+        assert format_time(125.5) == "2m 5.5s"
+    
+    def test_format_time_zero(self):
+        """Test formatting zero seconds."""
+        from deep_agent_search import format_time
+        
+        assert format_time(0.0) == "0.0s"
+
+
 class TestVirtualPathMapping:
     """Test the virtual path mapping logic."""
     
@@ -217,21 +243,23 @@ class TestIntegration:
     """Integration tests that require the full environment."""
     
     @pytest.mark.skip(reason="Requires GitHub Copilot token and full environment")
-    def test_search_returns_answer(self):
-        """Integration test: search returns an answer."""
+    def test_search_returns_answer_and_time(self):
+        """Integration test: search returns an answer and elapsed time."""
         from deep_agent_search import search
         
-        answer = search("What is DeepAgents?")
+        answer, tool_calls, elapsed = search("What is DeepAgents?")
         
         assert answer is not None
         assert len(answer) > 0
+        assert isinstance(elapsed, float)
+        assert elapsed > 0
     
     @pytest.mark.skip(reason="Requires GitHub Copilot token and full environment")
     def test_search_includes_citation(self):
         """Integration test: search includes citations."""
         from deep_agent_search import search
         
-        answer = search("What is DeepAgents?")
+        answer, tool_calls, elapsed = search("What is DeepAgents?")
         
         # Should contain a citation in brackets
         assert "[" in answer and "]" in answer

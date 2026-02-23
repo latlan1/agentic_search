@@ -28,6 +28,7 @@ Environment Variables:
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any
 from dotenv import load_dotenv
@@ -41,20 +42,44 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import AIMessage, ToolMessage
 
 # Rich console for beautiful terminal output
-from rich.console import Console
-from rich.markdown import Markdown
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
-from rich import box
+# type: ignore comments suppress LSP false positives for runtime-valid imports
+from rich.console import Console  # type: ignore[import-untyped]
+from rich.markdown import Markdown  # type: ignore[import-untyped]
+from rich.panel import Panel  # type: ignore[import-untyped]
+from rich.table import Table  # type: ignore[import-untyped]
+from rich.text import Text  # type: ignore[import-untyped]
+from rich import box  # type: ignore[import-untyped]
 
 load_dotenv()
 
 # Initialize rich console
 console = Console()
 
-# Anthropic Claude configuration
-DEFAULT_MODEL = "claude-sonnet-4-20250514"  # Claude Sonnet 4.5
+
+def format_time(seconds: float) -> str:
+    """Format elapsed time in a human-readable way."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = int(seconds // 60)
+    remaining_seconds = seconds % 60
+    return f"{minutes}m {remaining_seconds:.1f}s"
+
+# =============================================================================
+# LLM Model Configuration
+# =============================================================================
+# Fallback model if LLM_MODEL env var is not set or invalid
+FALLBACK_MODEL = "claude-sonnet-4-5-20250929"  # Claude Sonnet 4.5
+
+def get_model_name() -> str:
+    """
+    Get the LLM model name from environment with fallback.
+    
+    Priority:
+    1. LLM_MODEL environment variable (shared across all approaches)
+    2. FALLBACK_MODEL constant (hardcoded fallback)
+    """
+    model = os.getenv("LLM_MODEL") or FALLBACK_MODEL
+    return model
 
 # Paths to documentation
 DOCS_DIRS = {
@@ -185,6 +210,10 @@ def filter_tools_read_only(tools: list) -> list:
 def get_anthropic_llm():
     """
     Create a ChatAnthropic instance configured for Claude Sonnet 4.5.
+    
+    Model resolution priority:
+    1. LLM_MODEL env var (shared across all approaches)
+    2. FALLBACK_MODEL constant (hardcoded fallback)
     """
     anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
     if not anthropic_api_key:
@@ -193,10 +222,11 @@ def get_anthropic_llm():
             "Get your API key at https://console.anthropic.com/settings/keys"
         )
     
-    model_name = os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL)
+    model_name = get_model_name()
+    console.print(f"[dim]Using model: {model_name}[/dim]")
     os.environ["ANTHROPIC_API_KEY"] = anthropic_api_key
     
-    return ChatAnthropic(model=model_name)
+    return ChatAnthropic(model_name=model_name)  # type: ignore[call-arg]
 
 
 def create_search_agent(files: dict[str, dict]):
@@ -211,8 +241,10 @@ def create_search_agent(files: dict[str, dict]):
         checkpointer=checkpointer,
     )
     
+    # Filter out write tools from the agent's available tools
+    # The agent object has a 'tools' attribute at runtime that LSP doesn't recognize
     if hasattr(agent, 'tools'):
-        agent.tools = filter_tools_read_only(agent.tools)
+        agent.tools = filter_tools_read_only(agent.tools)  # type: ignore[attr-defined]
     
     return agent, files
 
@@ -330,7 +362,7 @@ def render_response(response: str, tool_calls: list[dict] | None = None):
     ))
 
 
-def search(query: str, thread_id: str = "default", verbose: bool = False) -> tuple[str, list[dict]]:
+def search(query: str, thread_id: str = "default", verbose: bool = False) -> tuple[str, list[dict], float]:
     """
     Search the documentation corpus and return an answer with citations.
     
@@ -340,13 +372,15 @@ def search(query: str, thread_id: str = "default", verbose: bool = False) -> tup
         verbose: If True, return tool calls for display
         
     Returns:
-        Tuple of (answer string, list of tool calls)
+        Tuple of (answer string, list of tool calls, elapsed time in seconds)
     """
+    start_time = time.time()
+    
     # Load documentation into virtual filesystem
     files = load_documentation_files()
     
     if not files:
-        return "Error: No documentation files found. Please check the data/ directory.", []
+        return "Error: No documentation files found. Please check the data/ directory.", [], 0.0
     
     console.print(f"[dim]Loaded {len(files)} documentation files into virtual filesystem[/dim]")
     
@@ -362,11 +396,13 @@ def search(query: str, thread_id: str = "default", verbose: bool = False) -> tup
         config={"configurable": {"thread_id": thread_id}}
     )
     
+    elapsed_time = time.time() - start_time
+    
     # Extract tool calls for verbose mode
     tool_calls = extract_tool_calls(result["messages"]) if verbose else []
     
     # Extract the final response
-    return result["messages"][-1].content, tool_calls
+    return result["messages"][-1].content, tool_calls, elapsed_time
 
 
 def interactive_session(verbose: bool = True):
@@ -426,9 +462,10 @@ def interactive_session(verbose: bool = True):
             
             console.print()
             with console.status("[bold green]Searching...[/bold green]"):
-                answer, tool_calls = search(query, thread_id=thread_id, verbose=VERBOSE)
+                answer, tool_calls, elapsed = search(query, thread_id=thread_id, verbose=VERBOSE)
             
             render_response(answer, tool_calls)
+            console.print(f"[dim]Completed in {format_time(elapsed)}[/dim]")
             console.print()
             
         except KeyboardInterrupt:
@@ -481,9 +518,10 @@ def main():
     console.print()
     
     with console.status("[bold green]Searching documentation...[/bold green]"):
-        answer, tool_calls = search(query, verbose=VERBOSE)
+        answer, tool_calls, elapsed = search(query, verbose=VERBOSE)
     
     render_response(answer, tool_calls)
+    console.print(f"\n[dim]Completed in {format_time(elapsed)}[/dim]")
 
 
 if __name__ == "__main__":

@@ -35,8 +35,8 @@ Create a `.env` file in the project root:
 # Required for all approaches
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
 
-# Optional: Override default model (default: claude-sonnet-4-20250514)
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+# Optional: Override default model (default: claude-sonnet-4-5-20250929)
+ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
 ```
 
 ---
@@ -166,7 +166,7 @@ cp .env.example .env
 deepagents
 
 # Use a specific model
-deepagents --model claude-sonnet-4-5-20250514
+deepagents --model claude-sonnet-4-5-20250929
 
 # Resume last session
 deepagents -r
@@ -224,7 +224,7 @@ A LangGraph-based agent with `search_docs` and `read_docs` tools backed by Tanti
 │                        │         ▼            │             │
 │                        │  ┌────────────────┐  │             │
 │                        │  │ Anthropic LLM  │  │             │
-│                        │  │  (Claude 4.5)  │  │             │
+│                        │  │ (Claude Sonnet 4)│  │             │
 │                        │  └────────────────┘  │             │
 │                        └──────────────────────┘             │
 │                                 │                            │
@@ -305,7 +305,7 @@ agentic_search/
 ## Running Tests
 
 ```bash
-# Run all tests (99 passing, 12 skipped)
+# Run all tests (120 passing, 5 skipped)
 uv run pytest
 
 # Run tests for a specific component

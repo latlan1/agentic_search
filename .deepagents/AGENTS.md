@@ -2,6 +2,14 @@
 
 This agent searches and answers questions about DeepAgents and LangGraph documentation.
 
+## LLM Model Configuration
+
+**Required Model**: Claude Sonnet 4.5 (`claude-sonnet-4-5-20250929`)
+
+This approach uses the DeepAgents CLI which reads the model from environment variables:
+- Set `LLM_MODEL=claude-sonnet-4-5-20250929` in your `.env` file
+- Or use the `--model` flag: `deepagents --model claude-sonnet-4-5-20250929`
+
 ## Project Structure
 
 - Documentation: `data/` directory (READ-ONLY)

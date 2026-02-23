@@ -47,7 +47,7 @@ Create a `.env` file in the project root with the following:
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
 
 # Optional: Override default model
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
 ```
 
 ---
@@ -166,6 +166,8 @@ A LangGraph-based agent with `search_docs` and `read_docs` tools backed by Tanti
 - Multi-turn conversation memory
 - Automatic index building/updating via IndexManager
 - Graph visualization support
+- Rich markdown terminal output
+- Time tracking (shows elapsed time for each query)
 
 ### Usage
 
@@ -181,6 +183,9 @@ uv run scripts/tantivy_agent_search.py --sync "What is memory persistence?"
 
 # Generate LangGraph visualization
 uv run scripts/tantivy_agent_search.py --graph
+
+# Show version and model info
+uv run scripts/tantivy_agent_search.py --version
 ```
 
 ---

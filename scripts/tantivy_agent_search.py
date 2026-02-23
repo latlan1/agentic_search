@@ -10,8 +10,9 @@ Key Features:
 - BM25 full-text search with Reciprocal Rank Fusion (RRF)
 - Two-phase search: search (preview) -> read (full content)
 - Multi-turn conversation memory
-- Anthropic Claude Sonnet 4.5 for reasoning
+- Anthropic Claude Sonnet 4 for reasoning
 - Automatic index building/updating via IndexManager
+- Rich markdown terminal output
 
 Usage:
     uv run scripts/tantivy_agent_search.py "How do I create a subagent?"
@@ -21,10 +22,12 @@ Usage:
 
 Environment Variables:
     ANTHROPIC_API_KEY - Your Anthropic API key
+    LLM_MODEL - Model to use (default: claude-sonnet-4)
 """
 
 import os
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Literal
@@ -36,18 +39,37 @@ from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
 
 sys.path.insert(0, str(Path(__file__).parent))
 from tantivy_index_manager import IndexManager
-from tantivy_search import Document, DocumentSearchIndex, SearchResult
+from tantivy_search import DocumentSearchIndex
 
 load_dotenv()
 
-DEFAULT_MODEL = "claude-sonnet-4-5-20250514"
+# =============================================================================
+# LLM Model Configuration
+# =============================================================================
+# Fallback model if LLM_MODEL env var is not set or invalid
+FALLBACK_MODEL = "claude-sonnet-4-5-20250929"  # Claude Sonnet 4.5
+
+def get_model_name() -> str:
+    """
+    Get the LLM model name from environment with fallback.
+    
+    Priority:
+    1. LLM_MODEL environment variable (shared across all approaches)
+    3. FALLBACK_MODEL constant (hardcoded fallback)
+    """
+    model = os.getenv("LLM_MODEL") or FALLBACK_MODEL
+    return model
 
 _search_index: DocumentSearchIndex | None = None
 _index_manager: IndexManager | None = None
 _checkpointer = MemorySaver()
+_console = Console()
 
 
 def get_search_index() -> DocumentSearchIndex:
@@ -201,7 +223,13 @@ Subagents allow you to delegate tasks to specialized agents [1]. You can create 
 
 
 def get_llm() -> ChatAnthropic:
-    """Create a ChatAnthropic instance."""
+    """
+    Create a ChatAnthropic instance.
+    
+    Model resolution priority:
+    1. LLM_MODEL env var (shared across all approaches)
+    2. FALLBACK_MODEL constant (hardcoded fallback)
+    """
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         raise ValueError(
@@ -209,11 +237,11 @@ def get_llm() -> ChatAnthropic:
             "Get your API key from https://console.anthropic.com/settings/keys"
         )
 
-    model_name = os.getenv("ANTHROPIC_MODEL", DEFAULT_MODEL)
+    model_name = get_model_name()
 
     return ChatAnthropic(
-        model=model_name,
-        api_key=api_key,
+        model=model_name,  # type: ignore[call-arg]
+        api_key=api_key,  # type: ignore[call-arg]
     )
 
 
@@ -236,9 +264,9 @@ def create_agent():
     def should_continue(state: MessagesState) -> Literal["tools", "__end__"]:
         """Determine whether to call tools or end."""
         last_message = state["messages"][-1]
-        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        if hasattr(last_message, "tool_calls") and last_message.tool_calls:  # type: ignore[union-attr]
             return "tools"
-        return END
+        return END  # type: ignore[return-value]
 
     workflow = StateGraph(MessagesState)
     workflow.add_node("agent", agent_node)
@@ -266,9 +294,9 @@ def get_graph_for_visualization():
 
     def should_continue(state: MessagesState) -> Literal["tools", "__end__"]:
         last_message = state["messages"][-1]
-        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        if hasattr(last_message, "tool_calls") and last_message.tool_calls:  # type: ignore[union-attr]
             return "tools"
-        return END
+        return END  # type: ignore[return-value]
 
     workflow = StateGraph(MessagesState)
     workflow.add_node("agent", agent_node)
@@ -286,21 +314,37 @@ def generate_graph_png(output_path: str = "langgraph_visualization.png") -> str:
     graph = get_graph_for_visualization()
     drawable = graph.get_graph()
     png_data = drawable.draw_mermaid_png()
-    
+
     with open(output_path, "wb") as f:
         f.write(png_data)
-    
+
     return output_path
 
 
-def search(query: str, thread_id: str = "default", sync_first: bool = False) -> str:
-    """Search the documentation corpus and return an answer with citations."""
+def format_time(seconds: float) -> str:
+    """Format time duration as minutes and seconds."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = int(seconds // 60)
+    secs = seconds % 60
+    return f"{minutes}m {secs:.1f}s"
+
+
+def search(query: str, thread_id: str = "default", sync_first: bool = False) -> tuple[str, float]:
+    """
+    Search the documentation corpus and return an answer with citations.
+
+    Returns:
+        Tuple of (answer, elapsed_time_seconds)
+    """
+    start_time = time.time()
+
     if sync_first:
         manager = get_index_manager()
         manager.ensure_index_exists()
         added, updated, removed = manager.sync_all()
         if added + updated + removed > 0:
-            print(f"Index synced: {added} added, {updated} updated, {removed} removed")
+            _console.print(f"[dim]Index synced: {added} added, {updated} updated, {removed} removed[/dim]")
             global _search_index
             _search_index = None
 
@@ -310,11 +354,25 @@ def search(query: str, thread_id: str = "default", sync_first: bool = False) -> 
         config={"configurable": {"thread_id": thread_id}},
     )
 
+    elapsed = time.time() - start_time
+
     for message in reversed(result["messages"]):
         if isinstance(message, AIMessage) and message.content:
-            return message.content
+            content = message.content
+            # Handle case where content might be a list (multi-part response)
+            if isinstance(content, list):
+                content = str(content)
+            return content, elapsed
 
-    return "No answer generated."
+    return "No answer generated.", elapsed
+
+
+def print_response(answer: str, elapsed: float) -> None:
+    """Print the response with rich markdown formatting and timing."""
+    _console.print()
+    _console.print(Panel(Markdown(answer), title="Response", border_style="green"))
+    _console.print()
+    _console.print(f"[dim]Time taken: {format_time(elapsed)}[/dim]")
 
 
 def interactive_session(sync_first: bool = False):
@@ -323,41 +381,43 @@ def interactive_session(sync_first: bool = False):
         manager = get_index_manager()
         manager.ensure_index_exists()
         added, updated, removed = manager.sync_all()
-        print(f"Index synced: {added} added, {updated} updated, {removed} removed")
+        _console.print(f"[dim]Index synced: {added} added, {updated} updated, {removed} removed[/dim]")
     else:
         get_index_manager().ensure_index_exists()
 
     thread_id = str(uuid.uuid4())
-    print("Tantivy Agent Search - Interactive Mode")
-    print("=" * 60)
-    print(f"Session ID: {thread_id}")
-    print("Type 'quit' or 'exit' to end the session.")
-    print("Type '/sync' to sync the index with current files.")
-    print("=" * 60)
-    print()
+    _console.print(Panel.fit(
+        f"[bold]Tantivy Agent Search - Interactive Mode[/bold]\n\n"
+        f"Session ID: [cyan]{thread_id}[/cyan]\n"
+        f"Type [green]'quit'[/green] or [green]'exit'[/green] to end the session.\n"
+        f"Type [green]'/sync'[/green] to sync the index with current files.",
+        border_style="blue"
+    ))
+    _console.print()
 
     while True:
         try:
-            query = input("You: ").strip()
+            query = _console.input("[bold blue]You:[/bold blue] ").strip()
             if not query:
                 continue
             if query.lower() in ("quit", "exit"):
-                print("Goodbye!")
+                _console.print("[yellow]Goodbye![/yellow]")
                 break
             if query.lower() == "/sync":
                 manager = get_index_manager()
                 added, updated, removed = manager.sync_all()
-                print(f"Index synced: {added} added, {updated} updated, {removed} removed")
+                _console.print(f"[dim]Index synced: {added} added, {updated} updated, {removed} removed[/dim]")
                 global _search_index
                 _search_index = None
                 continue
 
-            print()
-            answer = search(query, thread_id=thread_id)
-            print(f"Agent: {answer}")
-            print()
+            _console.print()
+            with _console.status("[bold green]Searching...[/bold green]"):
+                answer, elapsed = search(query, thread_id=thread_id)
+            print_response(answer, elapsed)
+            _console.print()
         except KeyboardInterrupt:
-            print("\nGoodbye!")
+            _console.print("\n[yellow]Goodbye![/yellow]")
             break
 
 
@@ -386,29 +446,41 @@ def main():
         metavar="OUTPUT",
         help="Generate PNG visualization of the LangGraph workflow (default: langgraph_visualization.png)",
     )
+    parser.add_argument(
+        "--version", "-v", action="store_true", help="Show version and model information"
+    )
 
     args = parser.parse_args()
 
+    if args.version:
+        model = get_model_name()
+        _console.print(f"[bold]Tantivy Agent Search[/bold]")
+        _console.print(f"Model: [cyan]{model}[/cyan]")
+        _console.print(f"Fallback Model: [dim]{FALLBACK_MODEL}[/dim]")
+        return
+
     if args.graph:
         output_path = generate_graph_png(args.graph)
-        print(f"Graph visualization saved to: {output_path}")
+        _console.print(f"[green]Graph visualization saved to:[/green] {output_path}")
         return
 
     if args.interactive:
         interactive_session(sync_first=args.sync)
     elif args.query:
         query = " ".join(args.query)
-        print(f"Searching for: {query}\n")
-        print("-" * 60)
-        answer = search(query, thread_id=args.thread, sync_first=args.sync)
-        print(answer)
+        _console.print(f"[bold]Searching for:[/bold] {query}")
+        _console.print()
+        with _console.status("[bold green]Searching...[/bold green]"):
+            answer, elapsed = search(query, thread_id=args.thread, sync_first=args.sync)
+        print_response(answer, elapsed)
     else:
         parser.print_help()
-        print("\nExamples:")
-        print("  uv run scripts/tantivy_agent_search.py 'How do I create a subagent?'")
-        print("  uv run scripts/tantivy_agent_search.py --interactive")
-        print("  uv run scripts/tantivy_agent_search.py --sync 'What is memory persistence?'")
-        print("  uv run scripts/tantivy_agent_search.py --graph  # Generate PNG visualization")
+        _console.print("\n[bold]Examples:[/bold]")
+        _console.print("  uv run scripts/tantivy_agent_search.py 'How do I create a subagent?'")
+        _console.print("  uv run scripts/tantivy_agent_search.py --interactive")
+        _console.print("  uv run scripts/tantivy_agent_search.py --sync 'What is memory persistence?'")
+        _console.print("  uv run scripts/tantivy_agent_search.py --graph")
+        _console.print("  uv run scripts/tantivy_agent_search.py --version")
 
 
 if __name__ == "__main__":

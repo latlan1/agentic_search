@@ -10,7 +10,7 @@ This document outlines the implementation plan for `tantivy_agent_search`, a new
 
 **Key Design Decisions** (confirmed with user):
 - **Auto-indexing**: File watcher using `watchdog` to detect changes and trigger incremental re-indexing
-- **LLM Provider**: Anthropic (Claude Sonnet 4.5 - model: claude-sonnet-4-5-20250514)
+- **LLM Provider**: Anthropic (Claude Sonnet 4 - model: claude-sonnet-4-5-20250929)
 - **Conversation Memory**: Multi-turn support via LangGraph's `MemorySaver` checkpointer
 - **Augmentation**: Optional manual step (not auto-generated during indexing)
 

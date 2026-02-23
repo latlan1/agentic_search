@@ -75,6 +75,7 @@ You: What is a deep agent?
 ║ ## Sources                                                    ║
 ║ 1. [deepagents-overview.md](file:///path/to/file) - Overview  ║
 ╚══════════════════════════════════════════════════════════════╝
+Completed in 4.2s
 
 You: /verbose
 Verbose mode: ON
@@ -99,6 +100,7 @@ You: How do I add memory to it?
 ╠══════════════════════════════════════════════════════════════╣
 ║ To add memory to a deep agent... [uses conversation context]  ║
 ╚══════════════════════════════════════════════════════════════╝
+Completed in 5.8s
 
 You: quit
 Goodbye!
@@ -185,6 +187,28 @@ Output shows:
 
 ---
 
+## Time Tracking
+
+Each query displays elapsed time after completion:
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║ Answer                                                        ║
+╠══════════════════════════════════════════════════════════════╣
+║ [Response content...]                                         ║
+╚══════════════════════════════════════════════════════════════╝
+Completed in 4.2s
+```
+
+For queries taking over 60 seconds, time is shown as `Xm Ys`:
+```
+Completed in 1m 23.4s
+```
+
+This helps you understand query performance and identify slow searches.
+
+---
+
 ## Citations
 
 ### Format
@@ -233,7 +257,7 @@ The prompt does NOT tell the agent to "summarize" - it instructs it to:
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | Yes | - | Your Anthropic API key |
-| `ANTHROPIC_MODEL` | No | `claude-sonnet-4-20250514` | Model to use |
+| `ANTHROPIC_MODEL` | No | `claude-sonnet-4-5-20250929` | Model to use |
 
 ### Override Model
 
