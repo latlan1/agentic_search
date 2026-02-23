@@ -1,0 +1,78 @@
+[
+  {
+    "question_id": "Q1",
+    "approach": 3,
+    "question": "What is the purpose of subagents in DeepAgents and when should you NOT use them?",
+    "response": "Searching for: What is the purpose of subagents in DeepAgents and when should \nyou NOT use them?\n\n\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Response \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502 Perfect! I now have comprehensive information about subagents in DeepAgents. \u2502\n\u2502 Let me provide a detailed answer with proper citations.                      \u2502\n\u2502                                                                              \u2502\n\u2502 Purpose of Subagents in DeepAgents                                           \u2502\n\u2502                                                                              \u2502\n\u2502 Subagents in DeepAgents are designed to delegate specialized work and        \u2502\n\u2502 maintain clean context in your main agent. The primary purpose is to solve   \u2502\n\u2502 the context bloat problem [1].                                               \u2502\n\u2502                                                                              \u2502\n\u2502 Core Purpose                                                                 \u2502\n\u2502                                                                              \u2502\n\u2502 When agents use tools with large outputs (like web search, file reads, or    \u2502\n\u2502 database queries), the context window fills up quickly with intermediate     \u2502\n\u2502 results. Subagents isolate this detailed work\u2014the main agent receives only   \u2502\n\u2502 the final result, not the dozens of tool calls that produced it [1].         \u2502\n\u2502                                                                              \u2502\n\u2502 Deep agents come with a built-in task tool that enables them to spawn        \u2502\n\u2502 specialized subagents for context isolation, keeping the main agent's        \u2502\n\u2502 context clean while still going deep on specific subtasks [2].               \u2502\n\u2502                                                                              \u2502\n\u2502 When to Use Subagents                                                        \u2502\n\u2502                                                                              \u2502\n\u2502 Subagents are beneficial in these sc",
+    "time_seconds": 20.76258111000061,
+    "files_consulted": [
+      "deepagents-subagents.md",
+      "deepagents-overview.md"
+    ],
+    "chunk_hit_rate": 1.0,
+    "response_score": -1,
+    "error": null
+  },
+  {
+    "question_id": "Q2",
+    "approach": 3,
+    "question": "How do you configure long-term memory that persists across conversation threads in DeepAgents?",
+    "response": "Searching for: How do you configure long-term memory that persists across \nconversation threads in DeepAgents?\n\n\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Response \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502 Based on the documentation, here's how to configure long-term memory that    \u2502\n\u2502 persists across conversation threads in DeepAgents:                          \u2502\n\u2502                                                                              \u2502\n\u2502 Configuration Overview                                                       \u2502\n\u2502                                                                              \u2502\n\u2502 To enable long-term memory across threads, you use a CompositeBackend that   \u2502\n\u2502 routes specific filesystem paths (typically /memories/) to a StoreBackend,   \u2502\n\u2502 while keeping other paths ephemeral [1].                                     \u2502\n\u2502                                                                              \u2502\n\u2502 Basic Setup                                                                  \u2502\n\u2502                                                                              \u2502\n\u2502                                                                              \u2502\n\u2502  from deepagents import create_deep_agent                                    \u2502\n\u2502  from deepagents.backends import CompositeBackend, StateBackend,             \u2502\n\u2502  StoreBackend                                                                \u2502\n\u2502  from langgraph.store.memory import InMemoryStore                            \u2502\n\u2502  from langgraph.checkpoint.memory import MemorySaver                         \u2502\n\u2502                                                                              \u2502\n\u2502  checkpointer = MemorySaver()                                                \u2502\n\u2502                                                                              \u2502\n\u2502  def make_backend(runtime):                                                  \u2502\n\u2502      return CompositeBackend(                                                \u2502\n\u2502          default=State",
+    "time_seconds": 29.64167881011963,
+    "files_consulted": [
+      "deepagents-long-term-memory.md",
+      "deepagents-backends.md",
+      "deepagents-harness.md",
+      "deepagents-overview.md"
+    ],
+    "chunk_hit_rate": 1.0,
+    "response_score": -1,
+    "error": null
+  },
+  {
+    "question_id": "Q3",
+    "approach": 3,
+    "question": "What are the three types of decisions a human can make when reviewing a tool call in human-in-the-loop mode?",
+    "response": "Searching for: What are the three types of decisions a human can make when \nreviewing a tool call in human-in-the-loop mode?\n\n\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Response \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502 Based on the documentation, when reviewing a tool call in human-in-the-loop  \u2502\n\u2502 mode, a human can make three types of decisions:                             \u2502\n\u2502                                                                              \u2502\n\u2502  1 \"approve\" - Execute the tool with the original arguments as proposed by   \u2502\n\u2502    the agent [1]                                                             \u2502\n\u2502  2 \"edit\" - Modify the tool arguments before execution [1]                   \u2502\n\u2502  3 \"reject\" - Skip executing this tool call entirely [1]                     \u2502\n\u2502                                                                              \u2502\n\u2502 These decisions can be customized per tool using the allowed_decisions       \u2502\n\u2502 configuration. For example:                                                  \u2502\n\u2502                                                                              \u2502\n\u2502                                                                              \u2502\n\u2502  interrupt_on = {                                                            \u2502\n\u2502      # Full control - all three options available                            \u2502\n\u2502      \"delete_file\": {\"allowed_decisions\": [\"approve\", \"edit\", \"reject\"]},    \u2502\n\u2502                                                                              \u2502\n\u2502      # Approval or rejection only - no editing                               \u2502\n\u2502      \"send_email\": {\"allowed_decisions\": [\"approve\", \"reject\"]},             \u2502\n\u2502                                                                              \u2502\n\u2502      # Must approve - no rejection allowed                                   \u2502\n\u2502      \"critical_operation\": {\"allowed_decisions\": [\"approve\"]},               \u2502\n\u2502  }                                                                           \u2502\n\u2502         ",
+    "time_seconds": 18.099143028259277,
+    "files_consulted": [
+      "deepagents-human-in-the-loop.md"
+    ],
+    "chunk_hit_rate": 1.0,
+    "response_score": -1,
+    "error": null
+  },
+  {
+    "question_id": "Q4",
+    "approach": 3,
+    "question": "What is the difference between skills and tools in DeepAgents, and when should you use each?",
+    "response": "Searching for: What is the difference between skills and tools in DeepAgents, \nand when should you use each?\n\n\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Response \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502 Based on the documentation, I can now provide a comprehensive answer about   \u2502\n\u2502 the differences between skills and tools in DeepAgents.                      \u2502\n\u2502                                                                              \u2502\n\u2502 Difference between Skills and Tools in DeepAgents                            \u2502\n\u2502                                                                              \u2502\n\u2502 Tools                                                                        \u2502\n\u2502                                                                              \u2502\n\u2502 Tools are individual functions that provide specific, lower-level            \u2502\n\u2502 capabilities to your agent [1][2]. They are:                                 \u2502\n\u2502                                                                              \u2502\n\u2502  \u2022 Single-purpose functions that perform discrete operations                 \u2502\n\u2502  \u2022 Always available to the agent in its context                              \u2502\n\u2502  \u2022 Immediately visible in the agent's system prompt from the start           \u2502\n\u2502  \u2022 Examples include: internet search, file system operations (read_file,     \u2502\n\u2502    write_file), planning (write_todos) [2][4]                                \u2502\n\u2502                                                                              \u2502\n\u2502 Here's an example of a tool:                                                 \u2502\n\u2502                                                                              \u2502\n\u2502                                                                              \u2502\n\u2502  def internet_search(                                                        \u2502\n\u2502      query: str,                                                             \u2502\n\u2502      max_results: int = 5,                                                   \u2502\n\u2502      topic: Literal[\"gen",
+    "time_seconds": 27.57370114326477,
+    "files_consulted": [
+      "deepagents-skills.md",
+      "deepagents-overview.md",
+      "deepagents-quickstart.md",
+      "deepagents-customization.md"
+    ],
+    "chunk_hit_rate": 1.0,
+    "response_score": -1,
+    "error": null
+  },
+  {
+    "question_id": "Q5",
+    "approach": 3,
+    "question": "If I want to create a research agent that delegates web searches to a subagent AND saves research findings to persistent memory across sessions, what specific DeepAgents components would I need to configure and how do they work together?",
+    "response": "Searching for: If I want to create a research agent that delegates web searches \nto a subagent AND saves research findings to persistent memory across sessions, \nwhat specific DeepAgents components would I need to configure and how do they \nwork together?\n\n\n\u256d\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 Response \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256e\n\u2502 Perfect! Now I have all the information needed to provide a comprehensive    \u2502\n\u2502 answer. Let me create a detailed response about creating a research agent    \u2502\n\u2502 with subagent delegation and persistent memory.                              \u2502\n\u2502                                                                              \u2502\n\u2502 Based on the documentation, here's exactly what you need to configure to     \u2502\n\u2502 create a research agent that delegates web searches to a subagent AND saves  \u2502\n\u2502 research findings to persistent memory across sessions:                      \u2502\n\u2502                                                                              \u2502\n\u2502 Required Components                                                          \u2502\n\u2502                                                                              \u2502\n\u2502 1. Web Search Tool                                                           \u2502\n\u2502                                                                              \u2502\n\u2502 First, create a web search tool (using Tavily or similar) [1]:               \u2502\n\u2502                                                                              \u2502\n\u2502                                                                              \u2502\n\u2502  import os                                                                   \u2502\n\u2502  from typing import Literal                                                  \u2502\n\u2502  from tavily import TavilyClient                                             \u2502\n\u2502  from deepagents import create_deep_agent                                    \u2502\n\u2502                                                                              \u2502\n\u2502  tavily_client = TavilyClient(api_key=o",
+    "time_seconds": 76.68091201782227,
+    "files_consulted": [
+      "deepagents-subagents.md",
+      "deepagents-long-term-memory.md",
+      "deepagents-harness.md",
+      "deepagents-quickstart.md",
+      "deepagents-customization.md"
+    ],
+    "chunk_hit_rate": 1.0,
+    "response_score": -1,
+    "error": null
+  }
+]

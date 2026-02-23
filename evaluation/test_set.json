@@ -1,0 +1,164 @@
+{
+  "version": "1.0",
+  "description": "Evaluation test set for comparing 3 agentic search approaches on DeepAgents documentation",
+  "test_cases": [
+    {
+      "id": "Q1",
+      "question": "What is the purpose of subagents in DeepAgents and when should you NOT use them?",
+      "difficulty": "easy",
+      "type": "single_hop",
+      "expected_answer": {
+        "key_points": [
+          "Subagents solve context bloat problem by isolating detailed work",
+          "Main agent receives only final result, not intermediate tool calls",
+          "Context quarantine - keeps main agent context clean",
+          "Should NOT use for simple single-step tasks",
+          "Should NOT use when you need to maintain intermediate context",
+          "Should NOT use when overhead outweighs benefits"
+        ],
+        "required_concepts": ["context isolation", "context bloat", "when NOT to use"]
+      },
+      "reference_chunks": [
+        {
+          "file": "deepagents-subagents.md",
+          "lines": "26-42",
+          "content_preview": "Subagents solve the context bloat problem... When NOT to use subagents: Simple single-step tasks, When you need to maintain intermediate context..."
+        }
+      ]
+    },
+    {
+      "id": "Q2",
+      "question": "How do you configure long-term memory that persists across conversation threads in DeepAgents?",
+      "difficulty": "medium",
+      "type": "single_hop",
+      "expected_answer": {
+        "key_points": [
+          "Use CompositeBackend with path routing",
+          "Route /memories/ path to StoreBackend",
+          "Default paths go to StateBackend (ephemeral)",
+          "Requires a LangGraph Store (InMemoryStore for dev, PostgresStore for production)",
+          "Files with /memories/ prefix persist across threads"
+        ],
+        "required_concepts": ["CompositeBackend", "StoreBackend", "/memories/ path", "cross-thread persistence"]
+      },
+      "reference_chunks": [
+        {
+          "file": "deepagents-long-term-memory.md",
+          "lines": "24-49",
+          "content_preview": "Configure long-term memory by using a CompositeBackend that routes the /memories/ path to a StoreBackend..."
+        },
+        {
+          "file": "deepagents-backends.md",
+          "lines": "140-158",
+          "content_preview": "CompositeBackend router... routes={'/memories/': StoreBackend(rt)}"
+        }
+      ]
+    },
+    {
+      "id": "Q3",
+      "question": "What are the three types of decisions a human can make when reviewing a tool call in human-in-the-loop mode?",
+      "difficulty": "easy",
+      "type": "single_hop",
+      "expected_answer": {
+        "key_points": [
+          "approve - execute tool with original arguments",
+          "edit - modify tool arguments before execution",
+          "reject - skip executing the tool call entirely"
+        ],
+        "required_concepts": ["approve", "edit", "reject", "allowed_decisions"]
+      },
+      "reference_chunks": [
+        {
+          "file": "deepagents-human-in-the-loop.md",
+          "lines": "69-89",
+          "content_preview": "approve: Execute the tool with the original arguments... edit: Modify the tool arguments... reject: Skip executing this tool call entirely"
+        }
+      ]
+    },
+    {
+      "id": "Q4",
+      "question": "What is the difference between skills and tools in DeepAgents, and when should you use each?",
+      "difficulty": "medium",
+      "type": "single_hop",
+      "expected_answer": {
+        "key_points": [
+          "Skills provide specialized workflows and domain knowledge via SKILL.md files",
+          "Skills use progressive disclosure - only loaded when needed",
+          "Use skills when there is a lot of context to reduce tokens in system prompt",
+          "Use skills to bundle capabilities together into larger actions",
+          "Use tools if agent does not have access to file system"
+        ],
+        "required_concepts": ["SKILL.md", "progressive disclosure", "context reduction", "bundled capabilities"]
+      },
+      "reference_chunks": [
+        {
+          "file": "deepagents-skills.md",
+          "lines": "214-221",
+          "content_preview": "Use skills when there is a lot of context... Use skills to bundle capabilities together... Use tools if the agent does not have access to the file system"
+        }
+      ]
+    },
+    {
+      "id": "Q5",
+      "question": "If I want to create a research agent that delegates web searches to a subagent AND saves research findings to persistent memory across sessions, what specific DeepAgents components would I need to configure and how do they work together?",
+      "difficulty": "hard",
+      "type": "multi_hop",
+      "reasoning_chain": [
+        "Step 1: Identify subagent configuration for web search delegation",
+        "Step 2: Identify long-term memory configuration for persistence",
+        "Step 3: Combine both in a single agent setup",
+        "Step 4: Explain interaction between subagent results and memory storage"
+      ],
+      "expected_answer": {
+        "key_points": [
+          "Create a research subagent with name, description, system_prompt, and tools (web search)",
+          "Pass subagents list to create_deep_agent",
+          "Configure CompositeBackend with StateBackend as default",
+          "Route /memories/ to StoreBackend for persistence",
+          "Provide a LangGraph Store (PostgresStore for production)",
+          "Instruct subagent to return concise summaries (not raw search results)",
+          "Main agent can save subagent results to /memories/research/ for persistence",
+          "Use checkpointer for session management"
+        ],
+        "required_concepts": ["subagent configuration", "CompositeBackend", "StoreBackend", "/memories/ routing", "context isolation"]
+      },
+      "reference_chunks": [
+        {
+          "file": "deepagents-subagents.md",
+          "lines": "104-139",
+          "content_preview": "research_subagent = { 'name': 'research-agent', 'description': '...', 'system_prompt': '...', 'tools': [internet_search] }..."
+        },
+        {
+          "file": "deepagents-long-term-memory.md",
+          "lines": "24-49",
+          "content_preview": "CompositeBackend... routes={'/memories/': StoreBackend(rt)}..."
+        },
+        {
+          "file": "deepagents-long-term-memory.md",
+          "lines": "168-188",
+          "content_preview": "research_agent = create_deep_agent(... /memories/research/sources.txt, /memories/research/notes.txt..."
+        },
+        {
+          "file": "deepagents-subagents.md",
+          "lines": "318-336",
+          "content_preview": "Return concise results... Do NOT include raw data, intermediate calculations..."
+        }
+      ]
+    }
+  ],
+  "scoring_rubric": {
+    "chunk_hit_rate": {
+      "description": "Percentage of reference chunks that were retrieved/consulted",
+      "calculation": "chunks_retrieved / total_reference_chunks"
+    },
+    "response_score": {
+      "0": "Poor - Missing most key points, incorrect information, or irrelevant",
+      "1": "Adequate - Covers some key points but incomplete or partially incorrect",
+      "2": "Excellent - Covers all/most key points accurately with good completeness"
+    },
+    "time_to_complete": {
+      "description": "Wall clock time from query submission to final response",
+      "unit": "seconds"
+    }
+  }
+}
