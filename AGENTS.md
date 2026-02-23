@@ -28,10 +28,10 @@ This ensures consistent dependency management and reproducible environments.
 
 This project implements **three separate, distinct approaches** to agentic search:
 
-| Approach | Script | Technology | Use Case |
-|----------|--------|------------|----------|
+| Approach | Script / Config | Technology | Use Case |
+|----------|-----------------|------------|----------|
 | **Approach 1** | `deep_agent_search.py` | DeepAgents + Virtual FS | Dynamic corpus, no index |
-| **Approach 2** | `tantivy_search.py` | Tantivy CLI | Direct search, no LLM |
+| **Approach 2** | `.deepagents/` | DeepAgents CLI | Interactive sessions, real-time discovery |
 | **Approach 3** | `tantivy_agent_search.py` | LangGraph + Tantivy | Production, ranked + LLM |
 
 All approaches use **Anthropic Claude Sonnet 4** as the LLM engine for formulating final responses with citations.
@@ -43,7 +43,7 @@ All approaches use **Anthropic Claude Sonnet 4** as the LLM engine for formulati
 Create a `.env` file in the project root with the following:
 
 ```bash
-# Required for Approaches 1 and 3
+# Required for all approaches
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
 
 # Optional: Override default model
@@ -63,17 +63,20 @@ agentic_search/
 │   ├── deepagents_index.jsonl
 │   └── langgraph_index.jsonl
 ├── tantivy_index/                   # Tantivy full-text index (generated)
+├── .deepagents/                     # Approach 2: DeepAgents CLI configuration
+│   ├── AGENTS.md                    # Project context
+│   └── skills/doc-search/           # Search skill
 ├── scripts/
 │   ├── deep_agent_search.py         # Approach 1: DeepAgent implementation
-│   ├── tantivy_search.py            # Approach 2: Tantivy CLI
 │   ├── tantivy_agent_search.py      # Approach 3: LangGraph + Tantivy agent
-│   ├── tantivy_index_manager.py     # Index management utilities
+│   ├── tantivy_index_manager.py     # Index management utilities (for Approach 3)
+│   ├── tantivy_search.py            # Direct Tantivy CLI (utility)
 │   └── trace_viewer.py              # Execution trace viewer
 ├── tests/
-│   ├── deep_agent_search/       # Tests for DeepAgent script
-│   ├── deepagents_cli/          # Tests for DeepAgents CLI config
-│   ├── tantivy_search/          # Tests for Tantivy CLI (search + index manager)
-│   └── tantivy_agent_search/    # Tests for Tantivy Agent
+│   ├── deep_agent_search/       # Tests for Approach 1
+│   ├── deepagents_cli/          # Tests for Approach 2
+│   ├── tantivy_search/          # Tests for Tantivy utilities
+│   └── tantivy_agent_search/    # Tests for Approach 3
 ├── prepare/                         # Planning documents and research
 │   ├── deep_agent_search_plan.md
 │   ├── tantivy_agent_search_plan.md
@@ -118,33 +121,34 @@ uv run scripts/deep_agent_search.py --verbose "What is context quarantine?"
 
 ---
 
-## Approach 2: Tantivy Search (CLI)
+## Approach 2: DeepAgents CLI
 
 ### Concept
 
-Direct BM25 full-text search using Tantivy. No LLM required - returns raw search results with RRF fusion for multiple queries.
+Uses the `deepagents-cli` tool with project-specific configuration in `.deepagents/`. Provides an interactive multi-turn conversation interface with real-time file discovery - no index required.
 
 ### Key Features
 
-- Fast BM25 search with Tantivy
-- Reciprocal Rank Fusion for multi-query search
-- Two-phase API: search() for previews, read() for full content
-- No LLM required
+- Interactive REPL with multi-turn conversations
+- Session persistence across restarts
+- Real-time file discovery (no index needed)
+- Human-in-the-loop safety controls
+- Project skills auto-loaded from `.deepagents/skills/`
 
 ### Usage
 
 ```bash
-# Build the index (run once, or after adding documents)
-uv run scripts/tantivy_index_manager.py build
+# Install DeepAgents CLI (one-time)
+uv tool install deepagents-cli
 
-# Search with single query
-uv run scripts/tantivy_search.py search "subagents"
+# Start interactive session
+deepagents
 
-# Search with multiple queries (RRF fusion)
-uv run scripts/tantivy_search.py search "memory" "persistence" "state"
+# Use a specific model
+deepagents --model claude-sonnet-4-5-20250514
 
-# Read specific documents by ID
-uv run scripts/tantivy_search.py read 0 3 5
+# Resume last session
+deepagents -r
 ```
 
 ---
@@ -203,7 +207,7 @@ uv run pytest -v
 
 ### Reciprocal Rank Fusion (RRF)
 
-Approaches 2 and 3 support multiple queries that are fused using RRF:
+Approach 3 supports multiple queries that are fused using RRF:
 
 ```
 RRF_score(doc) = Σ 1/(k + rank_i)
@@ -213,7 +217,7 @@ Where `k=60` is a constant and `rank_i` is the document's rank in query i.
 
 ### Two-Phase Search
 
-Approaches 2 and 3 implement a two-phase search pattern:
+Approach 3 implements a two-phase search pattern:
 1. **search()** - Returns previews (doc_id, filename, description, score)
 2. **read()** - Returns full content for selected documents
 
@@ -239,11 +243,13 @@ You can create them using the `Task` tool [2].
 
 | Feature | Approach 1 | Approach 2 | Approach 3 |
 |---------|------------|------------|------------|
-| Index required | No | Yes | Yes |
-| LLM required | Yes | No | Yes |
-| Ranked results | No | Yes (BM25) | Yes (BM25+RRF) |
-| Multi-query fusion | No | Yes | Yes |
-| Numbered citations | Yes | N/A | Yes |
-| Interactive mode | Yes | No | Yes |
-| Setup complexity | Low | Medium | Medium |
-| Best for | Dynamic docs | CLI search | Production |
+| Technology | DeepAgents script | DeepAgents CLI | LangGraph + Tantivy |
+| Index required | No | No | Yes |
+| LLM required | Yes | Yes | Yes |
+| Ranked results | No | No | Yes (BM25+RRF) |
+| Multi-query fusion | No | No | Yes |
+| Numbered citations | Yes | Yes | Yes |
+| Interactive mode | Yes | Yes (built-in) | Yes |
+| Session persistence | No | Yes | No |
+| Setup complexity | Low | Low | Medium |
+| Best for | Dynamic docs | Interactive sessions | Production |
