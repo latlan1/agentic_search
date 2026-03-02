@@ -157,15 +157,18 @@ deepagents -r
 
 ### Concept
 
-A LangGraph-based agent with `search_docs` and `read_docs` tools backed by Tantivy. Provides ranked BM25 results with RRF fusion and LLM-generated answers with numbered citations.
+A LangGraph-based agent that delegates search to **parallel subagents** backed by Tantivy. The parent agent formulates 2 query variations, dispatches them concurrently via `task` tool calls, then consolidates results into an answer with numbered citations.
+
+Uses `create_agent` (langchain) instead of `create_deep_agent` for full control over the middleware stack, reducing per-query token usage from ~46,000 to ~12,000 (fits within Anthropic's 30k tokens/min rate limit).
 
 ### Key Features
 
+- Parallel subagent delegation (2 concurrent search tasks)
 - BM25 full-text search with RRF fusion
 - Two-phase search: search (preview) -> read (full content)
+- Token-optimized middleware (custom task_description, default_middleware=[])
 - Multi-turn conversation memory
 - Automatic index building/updating via IndexManager
-- Graph visualization support
 - Rich markdown terminal output
 - Time tracking (shows elapsed time for each query)
 
@@ -180,12 +183,6 @@ uv run scripts/tantivy_agent_search.py --interactive
 
 # Sync index before searching
 uv run scripts/tantivy_agent_search.py --sync "What is memory persistence?"
-
-# Generate LangGraph visualization
-uv run scripts/tantivy_agent_search.py --graph
-
-# Show version and model info
-uv run scripts/tantivy_agent_search.py --version
 ```
 
 ---
@@ -252,7 +249,8 @@ You can create them using the `Task` tool [2].
 | Index required | No | No | Yes |
 | LLM required | Yes | Yes | Yes |
 | Ranked results | No | No | Yes (BM25+RRF) |
-| Multi-query fusion | No | No | Yes |
+| Multi-query fusion | No | No | Yes (RRF + parallel subagents) |
+| Parallel search | No | No | Yes (2 concurrent subagents) |
 | Numbered citations | Yes | Yes | Yes |
 | Interactive mode | Yes | Yes (built-in) | Yes |
 | Session persistence | No | Yes | No |

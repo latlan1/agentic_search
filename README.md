@@ -1,4 +1,4 @@
-# Agentic Search for Deep Markdown
+# Agentic Search
 
 Three approaches to agentic search over Markdown documentation corpora, inspired by Benjamin Anderson's article: [Agentic Search for Dummies](https://benanderson.work/blog/agentic-search-for-dummies/).
 
@@ -151,6 +151,8 @@ Answer with Citations
 ### Setup
 
 ```bash
+brew install direnv
+
 # Install DeepAgents CLI as a global tool
 uv tool install deepagents-cli
 
@@ -193,57 +195,49 @@ See `DEEPAGENTS_CLI_CHEATSHEET.md` for detailed usage.
 
 ## Approach 3: LangGraph + Tantivy Agent
 
-A LangGraph-based agent with `search_docs` and `read_docs` tools backed by Tantivy. Provides ranked BM25 results with RRF and LLM-generated answers with numbered citations.
+A LangGraph-based agent that delegates search to **parallel subagents** backed by Tantivy. The parent agent formulates 2 query variations, dispatches them concurrently via `task` tool calls, then consolidates results into an answer with numbered citations.
 
 ### Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    tantivy_agent_search                      │
-├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ┌────────────────┐    ┌──────────────────┐                 │
-│  │  File Watcher  │───▶│  Index Manager   │                 │
-│  │  (watchdog)    │    │  (incremental)   │                 │
-│  └────────────────┘    └────────┬─────────┘                 │
-│         │                       │                            │
-│         │ monitors              ▼                            │
-│         ▼              ┌──────────────────┐                 │
-│  ┌────────────────┐    │  Tantivy Index   │                 │
-│  │   data/        │    └────────┬─────────┘                 │
-│  │  ├── deepagents_raw_md/      │                           │
-│  │  └── langgraph_raw_md/       │ search/read               │
-│  └────────────────┘             ▼                            │
-│                        ┌──────────────────────┐             │
-│                        │  LangGraph Agent     │             │
-│                        │  ┌────────────────┐  │             │
-│                        │  │  search_docs   │  │             │
-│                        │  │  read_docs     │  │             │
-│                        │  └────────────────┘  │             │
-│                        │         │            │             │
-│                        │         ▼            │             │
-│                        │  ┌────────────────┐  │             │
-│                        │  │ Anthropic LLM  │  │             │
-│                        │  │ (Claude Sonnet 4)│  │             │
-│                        │  └────────────────┘  │             │
-│                        └──────────────────────┘             │
-│                                 │                            │
-│                                 ▼                            │
-│                        ┌──────────────────────┐             │
-│                        │  MemorySaver         │             │
-│                        │  (multi-turn)        │             │
-│                        └──────────────────────┘             │
-│                                                              │
-└─────────────────────────────────────────────────────────────┘
+User Query
+    → Parent Agent (create_agent + minimal middleware)
+        → Formulates 2 query variations (synonyms/related concepts)
+        → Delegates both IN PARALLEL via task tool
+            ┌─────────────────────────────────────────────┐
+            │  search_subagent #1                         │
+            │  search_docs(queries) → read_docs(ids)      │
+            │  → returns findings                         │
+            ├─────────────────────────────────────────────┤
+            │  search_subagent #2                         │
+            │  search_docs(queries) → read_docs(ids)      │
+            │  → returns findings                         │
+            └─────────────────────────────────────────────┘
+        → Consolidates results from both subagents
+        → Generates answer with numbered citations [1], [2]
+
+Tantivy Index (BM25 + RRF)
+    ← Built/synced by IndexManager from data/*.md files
 ```
+
+### Token-Optimized Middleware
+
+Uses `create_agent` (langchain) instead of `create_deep_agent` for full control over the middleware stack. This reduces per-query token usage from ~46,000 to ~12,000 — fitting within Anthropic's 30k tokens/min rate limit.
+
+| Optimization | Token savings |
+|-------------|--------------|
+| Custom `task_description` (~400 chars vs 6,914 default) | ~1,500/call |
+| `default_middleware=[]` on subagents | ~2,000/subagent call |
+| 2 parallel queries (reduced from 3) | ~4,400/query |
 
 ### Key Features
 
+- **Parallel subagent delegation**: 2 concurrent search tasks for better recall
 - **BM25 + RRF**: Full-text search with multi-query fusion
-- **Two-phase search**: Preview results, then read full content
+- **Two-phase search**: Preview results (`search_docs`), then read full content (`read_docs`)
+- **Token-optimized middleware**: Custom middleware stack (~12k tokens/query)
 - **Multi-turn memory**: Conversation persistence via `MemorySaver`
 - **Auto-sync**: Optionally sync index before searching
-- **Graph visualization**: Generate PNG of LangGraph workflow
 
 ### Usage
 
@@ -256,9 +250,6 @@ uv run scripts/tantivy_agent_search.py --interactive
 
 # Sync index before searching
 uv run scripts/tantivy_agent_search.py --sync "What is memory persistence?"
-
-# Generate LangGraph visualization
-uv run scripts/tantivy_agent_search.py --graph
 ```
 
 **Best for**: Production use, complex queries, multi-turn conversations.
@@ -364,7 +355,8 @@ You can create them using the `Task` tool [2].
 | Index required | No | No | Yes |
 | LLM required | Yes | Yes | Yes |
 | Ranked results | No | No | Yes (BM25+RRF) |
-| Multi-query fusion | No | No | Yes |
+| Multi-query fusion | No | No | Yes (RRF + parallel subagents) |
+| Parallel search | No | No | Yes (2 concurrent subagents) |
 | Numbered citations | Yes | Yes | Yes |
 | Interactive mode | Yes | Yes (built-in) | Yes |
 | Session persistence | No | Yes | No |

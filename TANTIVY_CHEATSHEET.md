@@ -1,362 +1,328 @@
-# Tantivy Cheatsheet
+# Tantivy Agent Search Cheatsheet
 
-Quick reference for using Tantivy full-text search in Python.
+Quick reference for using the LangGraph + Tantivy agent search (Approach 3).
 
 ---
 
-## Installation
+## Setup
+
+### 1. Set Environment Variable
 
 ```bash
-uv add tantivy
-# or
-pip install tantivy
+# Option A: Export directly
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Option B: Add to .env file
+echo 'ANTHROPIC_API_KEY=sk-ant-...' >> .env
+
+# Option C: Use .envrc with direnv
+echo 'export ANTHROPIC_API_KEY="sk-ant-..."' >> .envrc
+direnv allow
+```
+
+### 2. Build the Index
+
+```bash
+# Build Tantivy index from documentation files
+uv run scripts/tantivy_index_manager.py build
+
+# Or let it auto-build on first search
+uv run scripts/tantivy_agent_search.py "any query"
 ```
 
 ---
 
-## Schema Definition
+## Usage
 
-```python
-import tantivy
+### Single Query
 
-schema_builder = tantivy.SchemaBuilder()
+```bash
+# Basic search
+uv run scripts/tantivy_agent_search.py "How do I create a subagent?"
 
-# Text fields (searchable, optionally stored)
-schema_builder.add_text_field("title", stored=True)
-schema_builder.add_text_field("body", stored=True)
-schema_builder.add_text_field("tags", stored=True)
-
-# Integer fields (for IDs, counts)
-schema_builder.add_integer_field("doc_id", stored=True, indexed=True)
-
-# Build the schema
-schema = schema_builder.build()
+# Sync index before searching (picks up new/changed files)
+uv run scripts/tantivy_agent_search.py --sync "What is memory persistence?"
 ```
 
-### Field Types
+### Interactive Mode (Multi-turn)
 
-| Type | Method | Use Case |
-|------|--------|----------|
-| Text | `add_text_field()` | Searchable content |
-| Integer | `add_integer_field()` | IDs, counts, timestamps |
-| Float | `add_float_field()` | Scores, ratings |
-| Bytes | `add_bytes_field()` | Binary data |
+```bash
+# Start interactive session
+uv run scripts/tantivy_agent_search.py --interactive
 
-### Field Options
+# With index sync on startup
+uv run scripts/tantivy_agent_search.py --interactive --sync
+```
 
-| Option | Description |
-|--------|-------------|
-| `stored=True` | Field value retrievable from index |
-| `indexed=True` | Field is searchable |
-| `fast=True` | Enable fast field for sorting/aggregation |
+Example session:
+```
+╔══════════════════════════════════════════════════════════════╗
+║ Deep Agent Search - Interactive Mode                          ║
+╠══════════════════════════════════════════════════════════════╣
+║ Session ID: abc-123-def                                       ║
+║                                                               ║
+║ How it works:                                                 ║
+║ - Type /verbose to toggle tool call visibility               ║
+║ - Type /sync to re-sync the index                            ║
+║ - Type quit or exit to end session                           ║
+╚══════════════════════════════════════════════════════════════╝
+
+You: What is a deep agent?
+
+╔══════════════════════════════════════════════════════════════╗
+║ Answer                                                        ║
+╠══════════════════════════════════════════════════════════════╣
+║ A deep agent is... [formatted markdown response]              ║
+║                                                               ║
+║ ---                                                           ║
+║ **Sources:**                                                  ║
+║ [1] [deepagents-overview.md](data/deepagents_raw_md/...)      ║
+╚══════════════════════════════════════════════════════════════╝
+Completed in 47.6s
+
+You: quit
+Goodbye!
+```
+
+### Interactive Commands
+
+| Command | Description |
+|---------|-------------|
+| `/verbose` | Toggle tool call visibility |
+| `/sync` | Re-sync Tantivy index with files |
+| `quit` or `exit` | End session |
+| Ctrl+C | Force exit |
 
 ---
 
-## Index Creation
+## Architecture: Parallel Subagent Delegation
 
-```python
-from pathlib import Path
+The agent uses a **parent-subagent** pattern where the parent delegates search to 2 concurrent subagents:
 
-INDEX_DIR = Path("my_index")
-INDEX_DIR.mkdir(exist_ok=True)
-
-# Create index with schema
-index = tantivy.Index(schema, path=str(INDEX_DIR))
-
-# Or open existing index
-index = tantivy.Index.open(str(INDEX_DIR))
 ```
+User Query
+    → Parent Agent (create_agent + minimal middleware)
+        → Formulates 2 query variations (synonyms/related concepts)
+        → Delegates both IN PARALLEL via task tool
+            ┌─────────────────────────────────────────────┐
+            │  search_subagent #1                         │
+            │  search_docs(queries) → read_docs(ids)      │
+            │  → returns findings                         │
+            ├─────────────────────────────────────────────┤
+            │  search_subagent #2                         │
+            │  search_docs(queries) → read_docs(ids)      │
+            │  → returns findings                         │
+            └─────────────────────────────────────────────┘
+        → Consolidates results from both subagents
+        → Generates answer with numbered citations [1], [2]
+```
+
+### Why Subagents?
+
+Each subagent searches with a different query variation (e.g., "subagent" vs "delegate task"). This improves recall — different phrasings surface different documents. Results are then consolidated by the parent agent.
+
+### Why 2 Subagents (Not 3)?
+
+Token budget. Each subagent invocation costs LLM tokens. With 3 subagents the total reached ~46,000 input tokens/query, exceeding Anthropic's 30k tokens/min rate limit. Reducing to 2 subagents brings it to ~12,000 tokens/query while still providing good recall via query variation.
 
 ---
 
-## Indexing Documents
+## Token Optimization
 
-```python
-# Get a writer
-writer = index.writer()
+### The Problem
 
-# Add documents
-doc = tantivy.Document(
-    doc_id=1,
-    title="My Document",
-    body="This is the document content.",
-    tags="python search",
-)
-writer.add_document(doc)
+The original `create_deep_agent` hardcodes a middleware stack that injects ~4,400 tokens of system prompts and tool descriptions per LLM call. With multiple subagents, total overhead exceeded Anthropic's 30k tokens/min rate limit.
 
-# Commit changes (required!)
-writer.commit()
+### The Solution
 
-# Reload index to see new documents
-index.reload()
-```
+Replace `create_deep_agent` with `create_agent` (from langchain) for full control over the middleware stack.
 
-### Batch Indexing
+| Optimization | What changed | Token savings |
+|-------------|-------------|--------------|
+| Custom `task_description` | ~400 chars vs 6,914 default | ~1,500/call |
+| `default_middleware=[]` | Subagents get no middleware overhead | ~2,000/subagent call |
+| 2 parallel queries | Reduced from 3 subagent invocations | ~4,400/query |
 
-```python
-writer = index.writer()
+### Middleware Stack Comparison
 
-for i, item in enumerate(data):
-    doc = tantivy.Document(
-        doc_id=i,
-        title=item["title"],
-        body=item["content"],
-    )
-    writer.add_document(doc)
+| Middleware | Old (create_deep_agent) | New (create_agent) |
+|-----------|------------------------|-------------------|
+| TodoListMiddleware | Included (~1,182 tokens) | Removed |
+| FilesystemMiddleware | Included (~841 tokens) | Removed |
+| MemoryMiddleware | Included (~1,116 tokens) | Removed |
+| SubAgentMiddleware | Default 6,914-char desc | Custom ~400-char desc |
+| SummarizationMiddleware | Included | Included (with StateBackend) |
+| AnthropicPromptCachingMiddleware | Included | Included |
+| PatchToolCallsMiddleware | Included | Included |
+| **Subagent middleware** | All of the above | **None** (`default_middleware=[]`) |
 
-writer.commit()
-index.reload()
-```
+**Result**: ~12,000 tokens/query (down from ~46,000).
 
 ---
 
-## Searching
+## Two-Phase Search
 
-### Basic Search
+The subagents use a two-phase pattern to avoid loading unnecessary content:
 
-```python
-# Get a searcher
-searcher = index.searcher()
-
-# Parse and execute query
-query = index.parse_query("search terms", ["title", "body"])
-results = searcher.search(query, limit=10)
-
-# Process results
-for score, doc_address in results.hits:
-    doc = searcher.doc(doc_address)
-    print(f"Score: {score}")
-    print(f"Title: {doc.get_first('title')}")
-```
-
-### Query Syntax
-
-| Syntax | Description | Example |
-|--------|-------------|---------|
-| `term` | Single term | `python` |
-| `"phrase"` | Exact phrase | `"hello world"` |
-| `field:term` | Field-specific | `title:python` |
-| `term1 term2` | OR (default) | `python rust` |
-| `+term` | Must contain | `+python +fast` |
-| `-term` | Must not contain | `python -slow` |
-| `term*` | Prefix match | `pyth*` |
-| `term~2` | Fuzzy match | `pythn~2` |
-
-### Multi-Field Search
+### Phase 1: Search (Preview)
 
 ```python
-# Search across multiple fields
-search_fields = ["title", "body", "tags"]
-query = index.parse_query("python tutorial", search_fields)
-results = searcher.search(query, limit=10)
+search_docs(queries=["subagent", "delegate task"], limit=5)
 ```
 
----
+Returns previews — doc_id, filename, description, BM25 score. No full content loaded.
 
-## Retrieving Documents
+### Phase 2: Read (Full Content)
 
 ```python
-# Get document by address (from search results)
-doc = searcher.doc(doc_address)
-
-# Get field values
-title = doc.get_first("title")        # First value
-all_tags = doc.get_all("tags")        # All values (list)
-doc_id = doc.get_first("doc_id")      # Integer field
+read_docs(doc_ids=[1, 3, 5])
 ```
+
+Loads full document text only for the most relevant results. This prevents context window bloat.
 
 ---
 
 ## Reciprocal Rank Fusion (RRF)
 
-Combine results from multiple queries:
+When multiple query variations are passed to `search_docs`, results are fused using RRF:
 
-```python
-def rrf_search(index, queries: list[str], limit: int = 10) -> list:
-    """Multi-query search with RRF fusion."""
-    searcher = index.searcher()
-    search_fields = ["title", "body", "tags"]
-    
-    # Track document ranks per query
-    doc_ranks: dict[int, list[int]] = {}
-    
-    for query_str in queries:
-        query = index.parse_query(query_str, search_fields)
-        results = searcher.search(query, limit=limit * 2)
-        
-        for rank, (score, doc_addr) in enumerate(results.hits):
-            doc = searcher.doc(doc_addr)
-            doc_id = doc.get_first("doc_id")
-            if doc_id not in doc_ranks:
-                doc_ranks[doc_id] = []
-            doc_ranks[doc_id].append(rank)
-    
-    # Calculate RRF scores
-    k = 60  # Standard RRF constant
-    rrf_scores = {}
-    for doc_id, ranks in doc_ranks.items():
-        rrf_scores[doc_id] = sum(1.0 / (k + r) for r in ranks)
-    
-    # Sort by RRF score
-    return sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True)[:limit]
+```
+RRF_score(doc) = Sigma 1/(k + rank_i)
+```
+
+Where `k=60` and `rank_i` is the document's rank in query i. Documents appearing in multiple query results get boosted.
+
+---
+
+## Citations
+
+### Format
+
+Responses end with numbered sources:
+
+```markdown
+Subagents allow you to delegate tasks to specialized agents [1].
+You can create them using the `Task` tool [2].
+
+---
+**Sources:**
+[1] [deepagents-subagents.md](data/deepagents_raw_md/deepagents-subagents.md)
+[2] [deepagents-context.md](data/deepagents_raw_md/deepagents-context.md)
 ```
 
 ---
 
-## Complete Example
+## Index Management
 
-```python
-#!/usr/bin/env python3
-"""Complete Tantivy example."""
-
-from pathlib import Path
-import tantivy
-
-# 1. Define schema
-schema_builder = tantivy.SchemaBuilder()
-schema_builder.add_integer_field("doc_id", stored=True, indexed=True)
-schema_builder.add_text_field("title", stored=True)
-schema_builder.add_text_field("content", stored=True)
-schema = schema_builder.build()
-
-# 2. Create index
-INDEX_DIR = Path("example_index")
-INDEX_DIR.mkdir(exist_ok=True)
-index = tantivy.Index(schema, path=str(INDEX_DIR))
-
-# 3. Index documents
-writer = index.writer()
-
-docs = [
-    {"title": "Python Basics", "content": "Learn Python programming fundamentals."},
-    {"title": "Rust Tutorial", "content": "Getting started with Rust language."},
-    {"title": "Search Engines", "content": "How full-text search works with Python."},
-]
-
-for i, doc_data in enumerate(docs):
-    doc = tantivy.Document(
-        doc_id=i,
-        title=doc_data["title"],
-        content=doc_data["content"],
-    )
-    writer.add_document(doc)
-
-writer.commit()
-index.reload()
-
-# 4. Search
-searcher = index.searcher()
-query = index.parse_query("Python", ["title", "content"])
-results = searcher.search(query, limit=5)
-
-print(f"Found {len(results.hits)} results:\n")
-for score, doc_addr in results.hits:
-    doc = searcher.doc(doc_addr)
-    print(f"[{doc.get_first('doc_id')}] {doc.get_first('title')}")
-    print(f"    Score: {score:.4f}")
-    print(f"    Content: {doc.get_first('content')[:50]}...")
-    print()
-```
-
----
-
-## Project Scripts Reference
-
-### Index Manager
+### Build / Sync
 
 ```bash
 # Build index from scratch
 uv run scripts/tantivy_index_manager.py build
 
-# Sync index with files (incremental)
+# Incremental sync (add new, update changed, remove deleted)
 uv run scripts/tantivy_index_manager.py sync
 
-# Watch for file changes
+# Watch for file changes (auto-sync)
 uv run scripts/tantivy_index_manager.py watch
 
-# Show statistics
+# Show index statistics
 uv run scripts/tantivy_index_manager.py stats
 ```
 
-### Search CLI
+### Auto-Build
+
+The agent automatically builds the index on first use if it doesn't exist. Use `--sync` to force a sync before searching.
+
+---
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `ANTHROPIC_API_KEY` | Yes | - | Your Anthropic API key |
+| `ANTHROPIC_MODEL` | No | `claude-sonnet-4-5-20250929` | Model to use |
+
+### Override Model
 
 ```bash
-# Basic search
-uv run scripts/tantivy_search.py search "query terms"
-
-# Multi-query with RRF
-uv run scripts/tantivy_search.py search "term1" "term2" "term3"
-
-# Read document by ID
-uv run scripts/tantivy_search.py read 0 1 2
+export ANTHROPIC_MODEL="claude-3-5-sonnet-20241022"
+uv run scripts/tantivy_agent_search.py "What is a skill?"
 ```
 
-### Agent Search
+---
+
+## Command Reference
+
+| Command | Description |
+|---------|-------------|
+| `uv run scripts/tantivy_agent_search.py "query"` | Single search |
+| `uv run scripts/tantivy_agent_search.py -i` | Interactive mode |
+| `uv run scripts/tantivy_agent_search.py -s "query"` | Sync index + search |
+| `uv run scripts/tantivy_agent_search.py -i -s` | Interactive + sync |
+| `uv run scripts/tantivy_agent_search.py --thread abc` | Custom thread ID |
+
+---
+
+## Example Queries
 
 ```bash
-# Single query with AI agent
-uv run scripts/tantivy_agent_search.py "How do subagents work?"
+# DeepAgents questions
+uv run scripts/tantivy_agent_search.py "How do subagents work in DeepAgents?"
+uv run scripts/tantivy_agent_search.py "What middleware options are available?"
+uv run scripts/tantivy_agent_search.py "How does context quarantine work?"
 
-# Interactive mode
-uv run scripts/tantivy_agent_search.py --interactive
-
-# With index sync
-uv run scripts/tantivy_agent_search.py --sync "What is context isolation?"
-
-# Generate graph visualization
-uv run scripts/tantivy_agent_search.py --graph
+# LangGraph questions
+uv run scripts/tantivy_agent_search.py "How do I add persistence to a LangGraph agent?"
+uv run scripts/tantivy_agent_search.py "What is the difference between Graph API and Functional API?"
+uv run scripts/tantivy_agent_search.py "How do I implement human-in-the-loop?"
 ```
 
 ---
 
-## Performance Tips
+## Troubleshooting
 
-1. **Batch writes**: Add multiple documents before calling `commit()`
-2. **Limit results**: Use reasonable `limit` values (10-100)
-3. **Reload sparingly**: Only call `index.reload()` after commits
-4. **Use stored fields wisely**: Only store fields you need to retrieve
-5. **Index paths**: Use SSDs for index storage
+### "ANTHROPIC_API_KEY environment variable is required"
+
+```bash
+echo $ANTHROPIC_API_KEY  # Check if set
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+
+### Rate Limit Errors (429)
+
+The token-optimized middleware should keep usage under 30k tokens/min. If you still hit limits:
+- Wait 60 seconds between queries
+- Check if `ANTHROPIC_MODEL` is set to an unexpected model
+
+### "Index not found" / Empty Results
+
+```bash
+# Rebuild the index
+uv run scripts/tantivy_index_manager.py build
+
+# Verify data files exist
+ls data/deepagents_raw_md/
+ls data/langgraph_raw_md/
+```
+
+### Slow Response
+
+Normal — the agent makes multiple LLM calls (parent + 2 subagents). Typical time is 30-60 seconds depending on network and model latency.
 
 ---
 
-## Common Patterns
+## Files
 
-### Incremental Updates with Hashing
-
-```python
-import hashlib
-
-def compute_hash(content: str) -> str:
-    return hashlib.md5(content.encode()).hexdigest()
-
-# Track document hashes to detect changes
-metadata = {"path": {"doc_id": 0, "hash": "abc123"}}
-
-# Only re-index if content changed
-new_hash = compute_hash(new_content)
-if metadata.get(path, {}).get("hash") != new_hash:
-    # Re-index document
-    pass
-```
-
-### Search with Fallback
-
-```python
-def search_with_fallback(query: str, limit: int = 10):
-    results = searcher.search(index.parse_query(query, fields), limit=limit)
-    
-    if not results.hits:
-        # Try fuzzy search
-        fuzzy_query = f"{query}~2"
-        results = searcher.search(index.parse_query(fuzzy_query, fields), limit=limit)
-    
-    return results
-```
-
----
-
-## Resources
-
-- [Tantivy GitHub](https://github.com/quickwit-oss/tantivy)
-- [tantivy-py Documentation](https://github.com/quickwit-oss/tantivy-py)
-- [Query Syntax Reference](https://docs.rs/tantivy/latest/tantivy/query/struct.QueryParser.html)
+| File | Description |
+|------|-------------|
+| `scripts/tantivy_agent_search.py` | Main agent script |
+| `scripts/tantivy_search.py` | Tantivy search index (search/read tools) |
+| `scripts/tantivy_index_manager.py` | Index build/sync/watch utilities |
+| `scripts/helper.py` | Shared utilities (LLM, rendering, tool extraction) |
+| `tantivy_index/` | Generated Tantivy index directory |
+| `augmented_jsonl_index/` | LLM-generated keywords/descriptions |
+| `TANTIVY_CHEATSHEET.md` | This file |
+| `TANTIVY_LG_CHEATSHEET.md` | Tantivy library reference (schema, indexing, search) |

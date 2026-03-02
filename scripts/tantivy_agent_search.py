@@ -25,50 +25,40 @@ Environment Variables:
     LLM_MODEL - Model to use (default: claude-sonnet-4)
 """
 
-import os
-import sys
 import time
 import uuid
-from pathlib import Path
-from typing import Literal
-
 from dotenv import load_dotenv
-from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_core.tools import tool
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, START, MessagesState, StateGraph
-from langgraph.prebuilt import ToolNode
+from langchain_core.tools import tool
+from langchain.agents import create_agent
+from langchain_anthropic.middleware import AnthropicPromptCachingMiddleware
+from deepagents.middleware.subagents import SubAgentMiddleware, SubAgent
+from deepagents.middleware.summarization import SummarizationMiddleware
+from deepagents.backends.state import StateBackend
+from deepagents.middleware.patch_tool_calls import PatchToolCallsMiddleware
+from helper import (
+    get_anthropic_llm,
+    extract_tool_calls,
+    render_response,
+    format_time,
+    VERBOSE,
+)
+
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich import box
 
-sys.path.insert(0, str(Path(__file__).parent))
 from tantivy_index_manager import IndexManager
 from tantivy_search import DocumentSearchIndex
 
 load_dotenv()
 
-# =============================================================================
-# LLM Model Configuration
-# =============================================================================
-# Fallback model if LLM_MODEL env var is not set or invalid
-FALLBACK_MODEL = "claude-sonnet-4-5-20250929"  # Claude Sonnet 4.5
-
-def get_model_name() -> str:
-    """
-    Get the LLM model name from environment with fallback.
-    
-    Priority:
-    1. LLM_MODEL environment variable (shared across all approaches)
-    3. FALLBACK_MODEL constant (hardcoded fallback)
-    """
-    model = os.getenv("LLM_MODEL") or FALLBACK_MODEL
-    return model
+# Global checkpointer for multi-turn conversations
+checkpointer = MemorySaver()
 
 _search_index: DocumentSearchIndex | None = None
 _index_manager: IndexManager | None = None
-_checkpointer = MemorySaver()
 _console = Console()
 
 
@@ -94,7 +84,7 @@ def get_index_manager() -> IndexManager:
 
 
 @tool
-def search_docs(queries: list[str], limit: int = 10) -> str:
+def search_docs(queries: list[str], limit: int = 5) -> str:
     """
     Search the documentation corpus for relevant documents.
 
@@ -105,7 +95,7 @@ def search_docs(queries: list[str], limit: int = 10) -> str:
         queries: One or more search queries. Use multiple phrasings of the
                  same concept to improve results.
                  Example: ["subagent", "spawn subagent", "delegate task"]
-        limit: Maximum number of results to return (default 10)
+        limit: Maximum number of results to return (default 5)
 
     Returns:
         A formatted list of search results with doc_id, filename, description,
@@ -122,7 +112,9 @@ def search_docs(queries: list[str], limit: int = 10) -> str:
 
     output = f"Found {len(results)} results:\n\n"
     for r in results:
-        desc = r.description[:200] + "..." if len(r.description) > 200 else r.description
+        desc = (
+            r.description[:200] + "..." if len(r.description) > 200 else r.description
+        )
         output += f"[doc_id={r.doc_id}] {r.filename} (score: {r.score:.4f})\n"
         if desc:
             output += f"  Description: {desc}\n"
@@ -169,168 +161,104 @@ def read_docs(doc_ids: list[int]) -> str:
     return output
 
 
-SYSTEM_PROMPT = """You are an expert documentation search agent. Your job is to answer questions about the DeepAgents and LangGraph documentation using full-text search.
+CUSTOM_TASK_DESCRIPTION = """Delegate a search task to a subagent. The subagent runs autonomously and returns a single result.
 
-## Available Tools
+Available agents:
+{available_agents}
 
-1. **search_docs(queries, limit)**: Search the documentation index.
-   - Use multiple query variations for better recall
-   - Returns doc_id, filename, description, and score
-   - Example: search_docs(["subagent", "delegate task", "spawn agent"], limit=5)
+Launch multiple agents concurrently by issuing multiple tool calls in one response. Each invocation is stateless — provide all necessary context in the description."""
 
-2. **read_docs(doc_ids)**: Read full document content by ID.
-   - Use after search_docs to get complete text
-   - Example: read_docs([1, 3])
+SEARCH_SYSTEM_PROMPT = """You answer questions about DeepAgents and LangGraph docs by delegating to search_subagent.
 
-## Search Strategy
+**Tools:** task (delegates to search_subagent)
 
-1. **Formulate multiple queries**: Think of different ways to phrase the question
-   - Synonyms: "subagent" vs "child agent" vs "delegate"
-   - Concepts: "memory" vs "persistence" vs "state storage"
+**search_subagent tools:** search_docs(queries, limit), read_docs(doc_ids)
 
-2. **Review search results**: Look at filenames and descriptions to identify relevant docs
+**Workflow:**
+1. Create 2 query variations using synonyms (e.g., "subagent" / "delegate task")
+2. Delegate both IN PARALLEL using 2 task calls in ONE response
+3. Each task prompt: "Search for [variation] using search_docs with multiple query phrasings, then read the top results with read_docs. Return filenames, paths, and key content."
+4. Consolidate results into answer with numbered citations [1], [2]
 
-3. **Read promising documents**: Use read_docs() to get full content
-
-4. **Synthesize answer**: Combine information from multiple sources
-
-## Citation Format (IMPORTANT)
-
-You MUST use numbered citations in your responses. Format:
-
-1. At the end of your response, include a "Sources" section with numbered references
-2. In your answer text, reference sources using superscript-style numbers like [1], [2], etc.
-3. Each source should include the filename as a clickable link
-
-Example response format:
-```
-Subagents allow you to delegate tasks to specialized agents [1]. You can create them using the `Task` tool with context isolation [2].
+**Citation format:**
+Answer text [1]. More text [2].
 
 ---
 **Sources:**
-[1] [deepagents-subagents.md](data/deepagents_raw_md/deepagents-subagents.md)
-[2] [deepagents-context.md](data/deepagents_raw_md/deepagents-context.md)
-```
-
-## Important Guidelines
-
-- Use 2-4 query variations in search_docs() to improve recall
-- Only read documents that seem relevant based on descriptions
-- Prefer specific, actionable information over general summaries
-- Include code examples when they help explain concepts
-- ALWAYS use numbered citations [1], [2], etc. with a Sources section at the end
-"""
+[1] [file.md](path/to/file.md)
+[2] [file2.md](path/to/file2.md)"""
 
 
-def get_llm() -> ChatAnthropic:
+def create_search_agent(system_prompt):
     """
-    Create a ChatAnthropic instance.
-    
-    Model resolution priority:
-    1. LLM_MODEL env var (shared across all approaches)
-    2. FALLBACK_MODEL constant (hardcoded fallback)
+    Create an agent configured for read-only documentation search.
+
+    Uses create_agent (langchain) directly instead of create_deep_agent to
+    control the middleware stack and minimize per-request token overhead.
+
+    Removed middleware (not needed for search):
+    - TodoListMiddleware (~1,182 tokens/call — no todos needed)
+    - FilesystemMiddleware (~841 tokens/call — no fs access needed)
+    - MemoryMiddleware (~1,116 tokens/call — no AGENTS.md loading)
+
+    Custom overrides:
+    - task_description: ~400 chars vs default 6,914 chars (-1,500 tokens)
+    - default_middleware=[]: subagents get no middleware overhead (-2,000 tokens/call)
+    - general_purpose_agent=False: only search_subagent available
+    - system_prompt=None on SubAgentMiddleware: skip TASK_SYSTEM_PROMPT (-535 tokens)
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError(
-            "ANTHROPIC_API_KEY environment variable is required. "
-            "Get your API key from https://console.anthropic.com/settings/keys"
-        )
+    model = get_anthropic_llm(_console)
 
-    model_name = get_model_name()
+    search_subagent: SubAgent = {
+        "name": "search_subagent",
+        "description": "Searches and reads documentation using BM25 full-text search. Has search_docs and read_docs tools.",
+        "system_prompt": "Search and read documents as instructed. Return filenames, paths, and key content. Be concise.",
+        "tools": [search_docs, read_docs],
+    }
 
-    return ChatAnthropic(
-        model=model_name,  # type: ignore[call-arg]
-        api_key=api_key,  # type: ignore[call-arg]
+    # Minimal middleware stack — only what's needed
+    middleware = [
+        SubAgentMiddleware(
+            default_model=model,
+            default_tools=None,
+            subagents=[search_subagent],
+            default_middleware=[],  # No TodoList/Filesystem/Summarization on subagents
+            general_purpose_agent=False,  # Only search_subagent, no general-purpose
+            task_description=CUSTOM_TASK_DESCRIPTION,  # ~400 chars vs 6,914 default
+            system_prompt=None,  # Skip TASK_SYSTEM_PROMPT injection (535 tokens)
+        ),
+        SummarizationMiddleware(
+            model=model,
+            backend=StateBackend,  # Factory: Callable[[ToolRuntime], BackendProtocol]
+            trigger=("tokens", 170000),
+            keep=("messages", 6),
+            trim_tokens_to_summarize=None,
+            truncate_args_settings={
+                "trigger": ("messages", 20),
+                "keep": ("messages", 20),
+            },
+        ),
+        AnthropicPromptCachingMiddleware(unsupported_model_behavior="ignore"),
+        PatchToolCallsMiddleware(),
+    ]
+
+    agent = create_agent(
+        model,
+        system_prompt=system_prompt,
+        tools=[],  # Parent only delegates via task — no direct tools
+        middleware=middleware,
+        checkpointer=checkpointer,
     )
 
-
-def create_agent():
-    """Create a LangGraph agent with search/read tools."""
-    llm = get_llm()
-    tools = [search_docs, read_docs]
-    llm_with_tools = llm.bind_tools(tools)
-
-    def agent_node(state: MessagesState) -> dict:
-        """Process messages and generate response or tool calls."""
-        messages = state["messages"]
-
-        if not messages or not isinstance(messages[0], SystemMessage):
-            messages = [SystemMessage(content=SYSTEM_PROMPT)] + list(messages)
-
-        response = llm_with_tools.invoke(messages)
-        return {"messages": [response]}
-
-    def should_continue(state: MessagesState) -> Literal["tools", "__end__"]:
-        """Determine whether to call tools or end."""
-        last_message = state["messages"][-1]
-        if hasattr(last_message, "tool_calls") and last_message.tool_calls:  # type: ignore[union-attr]
-            return "tools"
-        return END  # type: ignore[return-value]
-
-    workflow = StateGraph(MessagesState)
-    workflow.add_node("agent", agent_node)
-    workflow.add_node("tools", ToolNode(tools))
-
-    workflow.add_edge(START, "agent")
-    workflow.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
-    workflow.add_edge("tools", "agent")
-
-    return workflow.compile(checkpointer=_checkpointer)
+    return agent.with_config({"recursion_limit": 1000})
 
 
-def get_graph_for_visualization():
-    """Create a minimal agent graph for visualization (no checkpointer)."""
-    llm = get_llm()
-    tools = [search_docs, read_docs]
-    llm_with_tools = llm.bind_tools(tools)
-
-    def agent_node(state: MessagesState) -> dict:
-        messages = state["messages"]
-        if not messages or not isinstance(messages[0], SystemMessage):
-            messages = [SystemMessage(content=SYSTEM_PROMPT)] + list(messages)
-        response = llm_with_tools.invoke(messages)
-        return {"messages": [response]}
-
-    def should_continue(state: MessagesState) -> Literal["tools", "__end__"]:
-        last_message = state["messages"][-1]
-        if hasattr(last_message, "tool_calls") and last_message.tool_calls:  # type: ignore[union-attr]
-            return "tools"
-        return END  # type: ignore[return-value]
-
-    workflow = StateGraph(MessagesState)
-    workflow.add_node("agent", agent_node)
-    workflow.add_node("tools", ToolNode(tools))
-
-    workflow.add_edge(START, "agent")
-    workflow.add_conditional_edges("agent", should_continue, {"tools": "tools", END: END})
-    workflow.add_edge("tools", "agent")
-
-    return workflow.compile()
-
-
-def generate_graph_png(output_path: str = "langgraph_visualization.png") -> str:
-    """Generate a PNG visualization of the LangGraph workflow."""
-    graph = get_graph_for_visualization()
-    drawable = graph.get_graph()
-    png_data = drawable.draw_mermaid_png()
-
-    with open(output_path, "wb") as f:
-        f.write(png_data)
-
-    return output_path
-
-
-def format_time(seconds: float) -> str:
-    """Format time duration as minutes and seconds."""
-    if seconds < 60:
-        return f"{seconds:.1f}s"
-    minutes = int(seconds // 60)
-    secs = seconds % 60
-    return f"{minutes}m {secs:.1f}s"
-
-
-def search(query: str, thread_id: str = "default", sync_first: bool = False) -> tuple[str, float]:
+def search(
+    query: str,
+    thread_id: str = "default",
+    sync_first: bool = False,
+    verbose: bool = False,
+) -> tuple[str, list[dict], float]:
     """
     Search the documentation corpus and return an answer with citations.
 
@@ -344,55 +272,61 @@ def search(query: str, thread_id: str = "default", sync_first: bool = False) -> 
         manager.ensure_index_exists()
         added, updated, removed = manager.sync_all()
         if added + updated + removed > 0:
-            _console.print(f"[dim]Index synced: {added} added, {updated} updated, {removed} removed[/dim]")
+            _console.print(
+                f"[dim]Index synced: {added} added, {updated} updated, {removed} removed[/dim]"
+            )
             global _search_index
             _search_index = None
 
-    agent = create_agent()
+    agent = create_search_agent(SEARCH_SYSTEM_PROMPT)
     result = agent.invoke(
-        {"messages": [HumanMessage(content=query)]},
+        {
+            "messages": [{"role": "user", "content": query}],
+        },
         config={"configurable": {"thread_id": thread_id}},
     )
 
-    elapsed = time.time() - start_time
+    elapsed_time = time.time() - start_time
 
-    for message in reversed(result["messages"]):
-        if isinstance(message, AIMessage) and message.content:
-            content = message.content
-            # Handle case where content might be a list (multi-part response)
-            if isinstance(content, list):
-                content = str(content)
-            return content, elapsed
+    # Extract tool calls for verbose mode
+    tool_calls = extract_tool_calls(result["messages"]) if verbose else []
 
-    return "No answer generated.", elapsed
+    # Extract the final response
+    return result["messages"][-1].content, tool_calls, elapsed_time
 
 
-def print_response(answer: str, elapsed: float) -> None:
-    """Print the response with rich markdown formatting and timing."""
-    _console.print()
-    _console.print(Panel(Markdown(answer), title="Response", border_style="green"))
-    _console.print()
-    _console.print(f"[dim]Time taken: {format_time(elapsed)}[/dim]")
-
-
-def interactive_session(sync_first: bool = False):
+def interactive_session(sync_first: bool = False, verbose: bool = True):
     """Run an interactive multi-turn conversation session."""
+    import uuid
+
     if sync_first:
         manager = get_index_manager()
         manager.ensure_index_exists()
         added, updated, removed = manager.sync_all()
-        _console.print(f"[dim]Index synced: {added} added, {updated} updated, {removed} removed[/dim]")
+        _console.print(
+            f"[dim]Index synced: {added} added, {updated} updated, {removed} removed[/dim]"
+        )
     else:
         get_index_manager().ensure_index_exists()
 
+    global VERBOSE
+    VERBOSE = verbose
+
     thread_id = str(uuid.uuid4())
-    _console.print(Panel.fit(
-        f"[bold]Tantivy Agent Search - Interactive Mode[/bold]\n\n"
-        f"Session ID: [cyan]{thread_id}[/cyan]\n"
-        f"Type [green]'quit'[/green] or [green]'exit'[/green] to end the session.\n"
-        f"Type [green]'/sync'[/green] to sync the index with current files.",
-        border_style="blue"
-    ))
+    _console.print(
+        Panel.fit(
+            f"""[bold]Deep Agent Search - Interactive Mode[/bold]
+
+[cyan]Session ID:[/cyan] {thread_id}
+
+[yellow]How it works:[/yellow]
+- Type [bold]/verbose[/bold] to toggle tool call visibility
+- Type [bold]quit[/bold] or [bold]exit[/bold] to end session""",
+            title="[bold green]Session Started[/bold green]",
+            border_style="green",
+            box=box.DOUBLE,
+        )
+    )
     _console.print()
 
     while True:
@@ -406,15 +340,26 @@ def interactive_session(sync_first: bool = False):
             if query.lower() == "/sync":
                 manager = get_index_manager()
                 added, updated, removed = manager.sync_all()
-                _console.print(f"[dim]Index synced: {added} added, {updated} updated, {removed} removed[/dim]")
+                _console.print(
+                    f"[dim]Index synced: {added} added, {updated} updated, {removed} removed[/dim]"
+                )
                 global _search_index
                 _search_index = None
+                continue
+            if query.lower() == "/verbose":
+                VERBOSE = not VERBOSE
+                _console.print(
+                    f"[yellow]Verbose mode: {'ON' if VERBOSE else 'OFF'}[/yellow]"
+                )
                 continue
 
             _console.print()
             with _console.status("[bold green]Searching...[/bold green]"):
-                answer, elapsed = search(query, thread_id=thread_id)
-            print_response(answer, elapsed)
+                answer, tool_calls, elapsed = search(
+                    query, thread_id=thread_id, verbose=VERBOSE
+                )
+            render_response(answer, _console, tool_calls)
+            _console.print(f"[dim]Completed in {format_time(elapsed)}[/dim]")
             _console.print()
         except KeyboardInterrupt:
             _console.print("\n[yellow]Goodbye![/yellow]")
@@ -425,44 +370,33 @@ def main():
     """CLI entry point."""
     import argparse
 
+    global VERBOSE
+
     parser = argparse.ArgumentParser(
-        description="Tantivy Agent Search - LangGraph agent with full-text search"
+        description="Tantivy RAG Agent Search - LangGraph agent with full-text search"
     )
     parser.add_argument(
-        "query", nargs="*", help="Search query (omit for interactive mode with --interactive)"
+        "query",
+        nargs="*",
+        help="Search query (omit for interactive mode with --interactive)",
     )
     parser.add_argument(
-        "--interactive", "-i", action="store_true", help="Run in interactive multi-turn mode"
+        "--interactive",
+        "-i",
+        action="store_true",
+        help="Run in interactive multi-turn mode",
     )
     parser.add_argument(
-        "--sync", "-s", action="store_true", help="Sync index with current files before searching"
-    )
-    parser.add_argument("--thread", default="default", help="Thread ID for conversation continuity")
-    parser.add_argument(
-        "--graph",
-        "-g",
-        nargs="?",
-        const="langgraph_visualization.png",
-        metavar="OUTPUT",
-        help="Generate PNG visualization of the LangGraph workflow (default: langgraph_visualization.png)",
+        "--sync",
+        "-s",
+        action="store_true",
+        help="Sync index with current files before searching",
     )
     parser.add_argument(
-        "--version", "-v", action="store_true", help="Show version and model information"
+        "--thread", default="default", help="Thread ID for conversation continuity"
     )
 
     args = parser.parse_args()
-
-    if args.version:
-        model = get_model_name()
-        _console.print(f"[bold]Tantivy Agent Search[/bold]")
-        _console.print(f"Model: [cyan]{model}[/cyan]")
-        _console.print(f"Fallback Model: [dim]{FALLBACK_MODEL}[/dim]")
-        return
-
-    if args.graph:
-        output_path = generate_graph_png(args.graph)
-        _console.print(f"[green]Graph visualization saved to:[/green] {output_path}")
-        return
 
     if args.interactive:
         interactive_session(sync_first=args.sync)
@@ -471,16 +405,22 @@ def main():
         _console.print(f"[bold]Searching for:[/bold] {query}")
         _console.print()
         with _console.status("[bold green]Searching...[/bold green]"):
-            answer, elapsed = search(query, thread_id=args.thread, sync_first=args.sync)
-        print_response(answer, elapsed)
+            answer, tool_calls, elapsed = search(
+                query, thread_id=args.thread, sync_first=args.sync, verbose=VERBOSE
+            )
+        render_response(answer, _console, tool_calls)
+        _console.print(f"[dim]Completed in {format_time(elapsed)}[/dim]")
+        _console.print()
     else:
         parser.print_help()
         _console.print("\n[bold]Examples:[/bold]")
-        _console.print("  uv run scripts/tantivy_agent_search.py 'How do I create a subagent?'")
+        _console.print(
+            "  uv run scripts/tantivy_agent_search.py 'How do I create a subagent?'"
+        )
         _console.print("  uv run scripts/tantivy_agent_search.py --interactive")
-        _console.print("  uv run scripts/tantivy_agent_search.py --sync 'What is memory persistence?'")
-        _console.print("  uv run scripts/tantivy_agent_search.py --graph")
-        _console.print("  uv run scripts/tantivy_agent_search.py --version")
+        _console.print(
+            "  uv run scripts/tantivy_agent_search.py --sync 'What is memory persistence?'"
+        )
 
 
 if __name__ == "__main__":
