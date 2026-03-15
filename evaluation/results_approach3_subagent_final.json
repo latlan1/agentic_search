@@ -1,0 +1,82 @@
+[
+  {
+    "question_id": "Q1",
+    "approach": 3,
+    "architecture": "subagent_delegation",
+    "question": "What is the purpose of subagents in DeepAgents and when should you NOT use them?",
+    "time_seconds": 39.868529081344604,
+    "files_consulted": [
+      "deepagents-subagents.md",
+      "deepagents-middleware.md",
+      "deepagents-harness.md",
+      "deepagents-overview.md"
+    ],
+    "chunk_hit_rate": 1.0,
+    "response_score": -1,
+    "error": null,
+    "source_file": "results_approach3_final.json"
+  },
+  {
+    "question_id": "Q2",
+    "approach": 3,
+    "architecture": "subagent_delegation",
+    "question": "How do you configure long-term memory that persists across conversation threads in DeepAgents?",
+    "time_seconds": 92.14346313476562,
+    "files_consulted": [
+      "deepagents-long-term-memory.md",
+      "deepagents-harness.md",
+      "deepagents-overview.md"
+    ],
+    "chunk_hit_rate": 0.5,
+    "response_score": -1,
+    "error": null,
+    "source_file": "results_q2_debug.json"
+  },
+  {
+    "question_id": "Q3",
+    "approach": 3,
+    "architecture": "subagent_delegation",
+    "question": "What are the three types of decisions a human can make when reviewing a tool call in human-in-the-loop mode?",
+    "time_seconds": 82.03127002716064,
+    "files_consulted": [
+      "deepagents-human-in-the-loop.md",
+      "deepagents-cli.md"
+    ],
+    "chunk_hit_rate": 1.0,
+    "response_score": -1,
+    "error": null,
+    "source_file": "results_q3_debug.json"
+  },
+  {
+    "question_id": "Q4",
+    "approach": 3,
+    "architecture": "subagent_delegation",
+    "question": "What is the difference between skills and tools in DeepAgents, and when should you use each?",
+    "time_seconds": 76.15307116508484,
+    "files_consulted": [
+      "deepagents-skills.md",
+      "deepagents-cli.md",
+      "deepagents-quickstart.md",
+      "deepagents-customization.md"
+    ],
+    "chunk_hit_rate": 1.0,
+    "response_score": -1,
+    "error": null,
+    "source_file": "results_q4_debug.json"
+  },
+  {
+    "question_id": "Q5",
+    "approach": 3,
+    "architecture": "subagent_delegation",
+    "question": "If I want to create a research agent that delegates web searches to a subagent AND saves research findings to persistent memory across sessions, what specific DeepAgents components would I need to configure and how do they work together?",
+    "time_seconds": 106.15062308311462,
+    "files_consulted": [
+      "deepagents-subagents.md",
+      "deepagents-long-term-memory.md"
+    ],
+    "chunk_hit_rate": 1.0,
+    "response_score": -1,
+    "error": null,
+    "source_file": "results_approach3_final.json"
+  }
+]

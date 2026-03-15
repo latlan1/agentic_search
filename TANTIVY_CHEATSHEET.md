@@ -1,6 +1,6 @@
-# Tantivy Agent Search Cheatsheet
+# Approach 4 Cheatsheet: DeepAgent (2 subagent) + Tantivy
 
-Quick reference for using the LangGraph + Tantivy agent search (Approach 3).
+Quick reference for using the DeepAgent (2 subagent) + Tantivy agent search (`scripts/tantivy_agent_search.py`, Approach 4).
 
 ---
 
@@ -95,7 +95,7 @@ Goodbye!
 
 ---
 
-## Architecture: Parallel Subagent Delegation
+## Architecture: Parallel Subagent Delegation (Approach 4)
 
 The agent uses a **parent-subagent** pattern where the parent delegates search to 2 concurrent subagents:
 
@@ -318,11 +318,11 @@ Normal — the agent makes multiple LLM calls (parent + 2 subagents). Typical ti
 
 | File | Description |
 |------|-------------|
-| `scripts/tantivy_agent_search.py` | Main agent script |
+| `scripts/tantivy_agent_search.py` | Main Approach 4 agent script |
 | `scripts/tantivy_search.py` | Tantivy search index (search/read tools) |
 | `scripts/tantivy_index_manager.py` | Index build/sync/watch utilities |
 | `scripts/helper.py` | Shared utilities (LLM, rendering, tool extraction) |
 | `tantivy_index/` | Generated Tantivy index directory |
 | `augmented_jsonl_index/` | LLM-generated keywords/descriptions |
-| `TANTIVY_CHEATSHEET.md` | This file |
-| `TANTIVY_LG_CHEATSHEET.md` | Tantivy library reference (schema, indexing, search) |
+| `TANTIVY_CHEATSHEET.md` | This file (Approach 4) |
+| `TANTIVY_LG_CHEATSHEET.md` | Approach 3 (LangGraph + Tantivy) cheatsheet |

@@ -1,19 +1,22 @@
 # Agentic Search
 
-Three approaches to agentic search over Markdown documentation corpora, inspired by Benjamin Anderson's article: [Agentic Search for Dummies](https://benanderson.work/blog/agentic-search-for-dummies/).
+Four approaches to agentic search over Markdown documentation corpora, inspired by Benjamin Anderson's article: [Agentic Search for Dummies](https://benanderson.work/blog/agentic-search-for-dummies/).
 
 ## Overview
 
-This project implements three distinct approaches to documentation search using AI agents:
+This project implements four distinct approaches to documentation search using AI agents:
 
 | Approach | Script / Config | Technology | Use Case |
 |----------|-----------------|------------|----------|
 | **1. DeepAgent** | `deep_agent_search.py` | DeepAgents + Virtual FS | Dynamic corpus, no index needed |
 | **2. DeepAgents CLI** | `.deepagents/` | DeepAgents CLI tool | Interactive sessions, real-time discovery |
-| **3. Tantivy Agent** | `tantivy_agent_search.py` | LangGraph + Tantivy | Production, ranked results with LLM |
+| **3. Tantivy LG Agent** | `tantivy_lg_agent_search.py` | LangGraph + Tantivy | Production baseline, ranked results with LLM |
+| **4. DeepAgent + Tantivy** | `tantivy_agent_search.py` | DeepAgents subagents + Tantivy | Parallel delegated search with token-optimized middleware |
 
 All approaches search over the same documentation corpus:
 - **DeepAgents docs** (12 files) - `data/deepagents_raw_md/`
+
+Only Approaches 1 and 2 (with File system read access) search over:
 - **LangGraph docs** (29 files) - `data/langgraph_raw_md/`
 
 ## Installation
@@ -69,7 +72,7 @@ User Query
     ▼
 ┌─────────────────────────┐
 │  Anthropic Claude       │
-│  (Sonnet 4)             │
+│  (Sonnet 4.5)           │
 └─────────────────────────┘
     │
     ▼
@@ -97,6 +100,8 @@ uv run scripts/deep_agent_search.py --verbose "What is context quarantine?"
 ```
 
 **Best for**: Small, frequently changing corpora where index maintenance is not desired.
+
+See `DEEP_AGENT_SEARCH_CHEATSHEET.md` for detailed usage.
 
 ---
 
@@ -133,7 +138,7 @@ User Query
     ▼
 ┌─────────────────────────┐
 │  Anthropic Claude       │
-│  (Sonnet 4)             │
+│  (Sonnet 4.5)           │
 └─────────────────────────┘
     │
     ▼
@@ -193,9 +198,75 @@ See `DEEPAGENTS_CLI_CHEATSHEET.md` for detailed usage.
 
 ---
 
-## Approach 3: LangGraph + Tantivy Agent
+## Approach 3: Tantivy LG Agent (LangGraph + Tantivy)
 
-A LangGraph-based agent that delegates search to **parallel subagents** backed by Tantivy. The parent agent formulates 2 query variations, dispatches them concurrently via `task` tool calls, then consolidates results into an answer with numbered citations.
+Baseline LangGraph + Tantivy agent implemented in `scripts/tantivy_lg_agent_search.py`. This approach uses a direct LangGraph workflow (`StateGraph`) with `search_docs` and `read_docs` tools, plus conversation memory via `MemorySaver`.
+
+### Architecture
+
+```
+User Query
+    │
+    ▼
+┌─────────────────────────┐
+│ tantivy_lg_agent_search │
+│ - LangGraph StateGraph  │
+│ - search_docs tool      │
+│ - read_docs tool        │
+│ - MemorySaver           │
+└─────────────────────────┘
+    │
+    ▼
+┌─────────────────────────┐
+│ Tantivy Index           │
+│ - BM25 search           │
+│ - RRF fusion            │
+│ - Two-phase retrieval   │
+└─────────────────────────┘
+    │
+    ▼
+┌─────────────────────────┐
+│ Anthropic Claude        │
+│ (Sonnet 4.5)            │
+└─────────────────────────┘
+    │
+    ▼
+Answer with Citations
+```
+
+### Key Features
+
+- **Direct LangGraph workflow**: `StateGraph` + `ToolNode` execution loop
+- **BM25 + RRF retrieval**: Fast ranked full-text search with query fusion
+- **Two-phase search**: `search_docs()` previews, `read_docs()` loads full content
+- **Conversation memory**: Multi-turn sessions via `MemorySaver`
+- **Operational utilities**: `--sync`, `--graph`, and `--version` flags
+
+### Usage
+
+```bash
+# Single query
+uv run scripts/tantivy_lg_agent_search.py "How do I create a subagent?"
+
+# Interactive mode
+uv run scripts/tantivy_lg_agent_search.py --interactive
+
+# Sync index before searching
+uv run scripts/tantivy_lg_agent_search.py --sync "What is memory persistence?"
+
+# Generate graph visualization
+uv run scripts/tantivy_lg_agent_search.py --graph
+```
+
+**Best for**: Production baseline with straightforward LangGraph + Tantivy architecture.
+
+See `TANTIVY_LG_CHEATSHEET.md` for detailed usage.
+
+---
+
+## Approach 4: DeepAgent (2 subagent) + Tantivy Agent
+
+A DeepAgent-based agent that delegates search to **parallel subagents** backed by Tantivy. The parent agent formulates 2 query variations, dispatches them concurrently via `task` tool calls, then consolidates results into an answer with numbered citations.
 
 ### Architecture
 
@@ -217,7 +288,7 @@ User Query
         → Generates answer with numbered citations [1], [2]
 
 Tantivy Index (BM25 + RRF)
-    ← Built/synced by IndexManager from data/*.md files
+    ← Built/synced by IndexManager from data/deepagents_raw_md/*.md files
 ```
 
 ### Token-Optimized Middleware
@@ -254,6 +325,8 @@ uv run scripts/tantivy_agent_search.py --sync "What is memory persistence?"
 
 **Best for**: Production use, complex queries, multi-turn conversations.
 
+See `TANTIVY_CHEATSHEET.md` for detailed usage.
+
 ---
 
 ## Directory Structure
@@ -270,15 +343,16 @@ agentic_search/
 │   └── skills/doc-search/       # Search skill
 ├── scripts/
 │   ├── deep_agent_search.py     # Approach 1: DeepAgent
-│   ├── tantivy_agent_search.py  # Approach 3: LangGraph Agent
-│   ├── tantivy_index_manager.py # Index management utilities (for Approach 3)
+│   ├── tantivy_lg_agent_search.py # Approach 3: LangGraph + Tantivy
+│   ├── tantivy_agent_search.py  # Approach 4: DeepAgent (2 subagent) + Tantivy
+│   ├── tantivy_index_manager.py # Index management utilities (for Approaches 3 & 4)
 │   ├── tantivy_search.py        # Direct Tantivy CLI (utility)
 │   └── trace_viewer.py          # Execution trace viewer
 ├── tests/
 │   ├── deep_agent_search/       # Tests for Approach 1
 │   ├── deepagents_cli/          # Tests for Approach 2
 │   ├── tantivy_search/          # Tests for Tantivy utilities
-│   └── tantivy_agent_search/    # Tests for Approach 3
+│   └── tantivy_agent_search/    # Tests for Approaches 3/4 Tantivy agents
 ├── prepare/                     # Planning documents and research
 │   ├── deep_agent_search_plan.md
 │   ├── deepagents_cli_plan.md
@@ -287,6 +361,7 @@ agentic_search/
 ├── AGENTS.md                    # Agent instructions for AI assistants
 ├── DEEP_AGENT_SEARCH_CHEATSHEET.md
 ├── DEEPAGENTS_CLI_CHEATSHEET.md
+├── TANTIVY_LG_CHEATSHEET.md
 ├── TANTIVY_CHEATSHEET.md
 └── pyproject.toml
 ```
@@ -315,7 +390,7 @@ uv run pytest -v
 
 ### Reciprocal Rank Fusion (RRF)
 
-Approach 3 supports multiple queries that are fused using RRF:
+Approaches 3 and 4 support multiple queries that are fused using RRF:
 
 ```
 RRF_score(doc) = Σ 1/(k + rank_i)
@@ -325,7 +400,7 @@ Where `k=60` is a constant and `rank_i` is the document's rank in query i. This 
 
 ### Two-Phase Search
 
-Approach 3 implements a two-phase search pattern:
+Approaches 3 and 4 implement a two-phase search pattern:
 1. **search_docs()** - Returns previews (doc_id, filename, description, score)
 2. **read_docs()** - Returns full content for selected documents
 
@@ -333,7 +408,7 @@ This prevents context window bloat when exploring search results.
 
 ### Numbered Citations
 
-Both agent-based approaches (1 and 3) generate responses with numbered citations:
+Agent-based approaches (1, 3, and 4) generate responses with numbered citations:
 
 ```
 Subagents allow you to delegate tasks to specialized agents [1].
@@ -349,19 +424,17 @@ You can create them using the `Task` tool [2].
 
 ## Comparison
 
-| Feature | Approach 1 | Approach 2 | Approach 3 |
-|---------|------------|------------|------------|
-| Technology | DeepAgents script | DeepAgents CLI | LangGraph + Tantivy |
-| Index required | No | No | Yes |
-| LLM required | Yes | Yes | Yes |
-| Ranked results | No | No | Yes (BM25+RRF) |
-| Multi-query fusion | No | No | Yes (RRF + parallel subagents) |
-| Parallel search | No | No | Yes (2 concurrent subagents) |
-| Numbered citations | Yes | Yes | Yes |
-| Interactive mode | Yes | Yes (built-in) | Yes |
-| Session persistence | No | Yes | No |
-| Setup complexity | Low | Low | Medium |
-| Best for | Dynamic docs | Interactive sessions | Production |
+| Feature | Approach 1 | Approach 2 | Approach 3 | Approach 4 |
+|---------|------------|------------|------------|------------|
+| Technology | DeepAgents script | DeepAgents CLI | LangGraph + Tantivy | DeepAgents subagents + Tantivy |
+| Index required | No | No | Yes | Yes |
+| Ranked results | No | No | Yes (BM25+RRF) | Yes (BM25+RRF) |
+| Multi-query fusion | No | No | Yes | Yes |
+| Parallel search | No | No | No (single agent + tools loop) | Yes (2 concurrent subagents) |
+| Interactive mode | Yes | Yes (built-in) | Yes | Yes |
+| Session persistence | No | Yes | No | No |
+| Setup complexity | Low | Low | Medium | Medium-High |
+| Best for | Dynamic docs | Interactive sessions | Production baseline | Production with delegated parallel search |
 
 ---
 
@@ -371,7 +444,7 @@ Detailed implementation plans for each approach are in `prepare/`:
 
 - `prepare/deep_agent_search_plan.md` - Approach 1 design and implementation
 - `prepare/deepagents_cli_plan.md` - DeepAgents CLI configuration
-- `prepare/tantivy_agent_search_plan.md` - Approach 3 design and implementation
+- `prepare/tantivy_agent_search_plan.md` - Tantivy agent design notes (primarily Approach 4)
 - `prepare/research.md` - Background research and references
 
 ---
